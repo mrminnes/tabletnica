@@ -30,16 +30,18 @@
 
   .week{ display:flex; gap:6px; margin-bottom:22px; }
   .wday{
-    flex:1; border-radius:14px; padding:10px 0 8px; text-align:center;
+    flex:1; border-radius:14px; padding:10px 0 8px; text-align:center; cursor:pointer;
     background:var(--card); border:2px solid var(--line); transition:all .2s;
   }
   .wday.today{
     background:var(--green); border-color:var(--green);
-    transform:translateY(-4px); box-shadow:0 6px 14px rgba(62,124,89,.28);
+    box-shadow:0 6px 14px rgba(62,124,89,.28);
   }
+  .wday.sel{ transform:translateY(-4px); border-color:var(--green); }
   .wday .lbl{ font-size:11px; font-weight:800; color:var(--mute); }
-  .wday.today .lbl{ color:#fff; }
-  .dots{ display:flex; gap:2px; justify-content:center; margin-top:5px; min-height:5px; }
+  .wday .num{ font-size:12px; font-weight:900; color:var(--ink); }
+  .wday.today .lbl, .wday.today .num{ color:#fff; }
+  .dots{ display:flex; gap:2px; justify-content:center; margin-top:4px; min-height:5px; }
   .dots span{ width:4px; height:4px; border-radius:99px; background:#B8CDC0; }
   .wday.today .dots span{ background:#CFE8DA; }
 
@@ -49,12 +51,14 @@
   }
   .card.taken{ border-color:var(--green-soft); opacity:.75; }
   .card.soon{ border-color:var(--amber); }
+  .card.missed{ border-color:var(--coral-soft); }
   .pill-btn{
     width:54px; height:54px; border-radius:18px; border:none; cursor:pointer;
     background:var(--green-soft); flex-shrink:0;
     box-shadow:inset 0 -3px 0 rgba(62,124,89,.15);
   }
   .pill-btn.done{ background:var(--green); box-shadow:inset 0 2px 6px rgba(0,0,0,.15); }
+  .pill-btn.locked{ cursor:default; opacity:.55; }
   .pill-btn.popping{ animation:pop .5s ease; }
   .pill-btn .check{ color:#fff; font-size:24px; font-weight:900; }
   .pill-shape{
@@ -74,6 +78,7 @@
   .time.soon{ color:var(--amber); }
   .status{ font-size:12px; color:var(--mute); font-weight:700; }
   .status.taken-at{ color:var(--green); }
+  .status.miss{ color:var(--coral); }
 
   .empty{
     background:var(--card); border-radius:20px; padding:28px; text-align:center;
@@ -96,11 +101,19 @@
   .btn-small.danger{ border-color:var(--coral-soft); color:var(--coral); }
 
   label{ font-size:13.5px; font-weight:800; color:var(--mute); margin:16px 0 6px; display:block; }
+  .hint-line{ font-size:12.5px; color:var(--mute); font-weight:600; margin:6px 0 0; }
   .inp{
     width:100%; padding:13px 14px; border-radius:14px; border:2px solid var(--line);
     font-size:16px; font-weight:700; color:var(--ink); background:var(--card); outline:none;
   }
   .inp:focus{ border-color:var(--green); }
+  .time-row{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .time-row .inp.t{ flex:1.6; }
+  .time-row .inp.n{ flex:1; }
+  .time-row .del{
+    width:40px; height:40px; border-radius:12px; border:2px solid var(--line);
+    background:var(--card); color:var(--coral); font-weight:900; font-size:16px; cursor:pointer; flex-shrink:0;
+  }
   .link-btn{ border:none; background:none; color:var(--green); font-weight:800; font-size:14px; cursor:pointer; padding:0; }
   .day-chips{ display:flex; gap:6px; }
   .day-chip{
@@ -157,23 +170,24 @@
 var PILL_COLORS = ["#7FB69B", "#E8A13C", "#8FA8D9", "#D98FB0", "#B69B7F"];
 var DAY_NAMES = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
 
-// ─── Хранилище (localStorage) ───
-function loadMeds() {
-  try { return JSON.parse(localStorage.getItem("meds")) || []; } catch (e) { return []; }
-}
-function saveMeds(m) { localStorage.setItem("meds", JSON.stringify(m)); }
-
+// ─── Даты ───
 function pad(n) { return String(n).padStart(2, "0"); }
 function dateKey(d) { d = d || new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
-function takenStoreKey() { return "taken:" + dateKey(); }
-function loadTaken() {
-  try { return JSON.parse(localStorage.getItem(takenStoreKey())) || {}; } catch (e) { return {}; }
-}
-function saveTaken(t) { localStorage.setItem(takenStoreKey(), JSON.stringify(t)); }
+function parseKey(k) { var p = k.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function stripTime(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function diffDays(a, b) { return Math.round((stripTime(b) - stripTime(a)) / 86400000); }
+function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+function dayIdx(d) { return (d.getDay() + 6) % 7; } // ПН = 0
 
-// Чистим отметки старше 60 дней, чтобы не копить мусор
+// ─── Хранилище ───
+function loadMeds() { try { return JSON.parse(localStorage.getItem("meds")) || []; } catch (e) { return []; } }
+function saveMeds(m) { localStorage.setItem("meds", JSON.stringify(m)); }
+function loadTakenFor(key) { try { return JSON.parse(localStorage.getItem("taken:" + key)) || {}; } catch (e) { return {}; } }
+function saveTakenFor(key, t) { localStorage.setItem("taken:" + key, JSON.stringify(t)); }
+
+// Чистим отметки старше 90 дней
 (function cleanup() {
-  var limit = new Date(); limit.setDate(limit.getDate() - 60);
+  var limit = new Date(); limit.setDate(limit.getDate() - 90);
   for (var i = localStorage.length - 1; i >= 0; i--) {
     var k = localStorage.key(i);
     if (k && k.indexOf("taken:") === 0 && k.slice(6) < dateKey(limit)) localStorage.removeItem(k);
@@ -182,73 +196,142 @@ function saveTaken(t) { localStorage.setItem(takenStoreKey(), JSON.stringify(t))
 
 // ─── Состояние ───
 var meds = loadMeds();
-var taken = loadTaken();
 var screen = "today";
+var selectedKey = dateKey();   // выбранный день в недельной ленте
 var justTaken = null;
 
-function todayIdx() { return (new Date().getDay() + 6) % 7; } // ПН = 0
-function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+// Миграция данных из версии 1.0 (не теряем уже введённые лекарства)
+(function migrate() {
+  var changed = false;
+  meds = meds.map(function (m) {
+    var nm = Object.assign({}, m);
+    if (nm.times.length && typeof nm.times[0] === "string") {
+      var n = 1, note = nm.dose || "";
+      var match = /^(\d+)\s*(.*)$/.exec(note);
+      if (match) { n = Math.max(1, +match[1]); note = match[2]; }
+      nm.times = nm.times.map(function (t) { return { t: t, n: n }; });
+      nm.doseNote = note; delete nm.dose; changed = true;
+    }
+    if (!nm.mode) { nm.mode = "weekly"; changed = true; }
+    if (!nm.start) { nm.start = dateKey(); changed = true; }
+    if (nm.every == null) { nm.every = 2; changed = true; }
+    if (nm.doseNote == null) nm.doseNote = "";
+    return nm;
+  });
+  if (changed) saveMeds(meds);
+})();
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
   });
 }
 
-function todayIntakes() {
-  var t = todayIdx(), list = [];
+// ─── Расписание: принимается ли лекарство в конкретную дату ───
+function occursOn(m, date) {
+  var diff = diffDays(parseKey(m.start), date);
+  if (diff < 0) return false;
+  if (m.courseDays && diff >= m.courseDays) return false;
+  if (m.mode === "interval") return diff % Math.max(1, m.every) === 0;
+  return m.days.indexOf(dayIdx(date)) !== -1;
+}
+
+function intakesFor(date) {
+  var list = [];
   meds.forEach(function (m) {
-    if (m.days.indexOf(t) !== -1) m.times.forEach(function (time) {
-      list.push({ med: m, time: time, key: m.id + "@" + time });
+    if (occursOn(m, date)) m.times.forEach(function (tm) {
+      list.push({ med: m, time: tm.t, n: tm.n, key: m.id + "@" + tm.t });
     });
   });
   return list.sort(function (a, b) { return a.time.localeCompare(b.time); });
 }
 
-// ─── Экран «Сегодня» ───
+function schedText(m) {
+  if (m.mode === "interval") {
+    return m.every === 1 ? "каждый день" : m.every === 2 ? "через день" : "каждые " + m.every + " дн.";
+  }
+  return m.days.length === 7 ? "каждый день" : m.days.map(function (d) { return DAY_NAMES[d]; }).join(" ");
+}
+
+// ─── Экран «Сегодня» (с просмотром любого дня недели) ───
 function renderToday() {
-  var now = new Date(), nowStr = hhmm(now), tIdx = todayIdx();
-  var dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
-  var intakes = todayIntakes();
+  var todayK = dateKey();
+  var selDate = parseKey(selectedKey);
+  var isToday = selectedKey === todayK;
+  var isFuture = selectedKey > todayK;
+  var isPast = selectedKey < todayK;
+  var nowStr = hhmm(new Date());
+  var taken = loadTakenFor(selectedKey);
+  var intakes = intakesFor(selDate);
   var done = intakes.filter(function (i) { return taken[i.key]; }).length;
 
-  var weekDots = function (d) {
-    return meds.reduce(function (n, m) {
-      return n + (m.days.indexOf(d) !== -1 ? Math.min(m.times.length, 3) : 0);
-    }, 0);
-  };
+  var dateStr = selDate.toLocaleDateString("ru-RU", isToday
+    ? { day: "numeric", month: "long" }
+    : { weekday: "long", day: "numeric", month: "long" });
+
+  var title = isToday
+    ? (done === intakes.length && intakes.length > 0 ? "Всё принято 🎉" : "Пора заботиться о себе")
+    : isFuture ? "План на этот день"
+    : (intakes.length === 0 ? "Приёмов не было" : done === intakes.length ? "Всё было принято ✅" : "Были пропуски");
+
+  var sub = isFuture ? "Запланировано приёмов: " + intakes.length
+    : "Принято: " + done + " из " + intakes.length;
+
+  // Недельная лента: ПН–ВС текущей недели, все дни кликабельны
+  var monday = stripTime(new Date());
+  monday.setDate(monday.getDate() - dayIdx(monday));
+  var week = "";
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(monday); d.setDate(monday.getDate() + i);
+    var k = dateKey(d);
+    var cnt = Math.min(intakesFor(d).length, 4), dots = "";
+    for (var j = 0; j < cnt; j++) dots += "<span></span>";
+    week += '<div class="wday' + (k === todayK ? " today" : "") + (k === selectedKey ? " sel" : "") + '" data-date="' + k + '" role="button">' +
+      '<div class="lbl">' + DAY_NAMES[i] + '</div><div class="num">' + d.getDate() + '</div><div class="dots">' + dots + '</div></div>';
+  }
 
   var html = '<p class="date">' + esc(dateStr) + '</p>' +
-    '<h1>' + (done === intakes.length && intakes.length > 0 ? "Всё принято 🎉" : "Пора заботиться о себе") + '</h1>' +
-    '<p class="sub">Сегодня: ' + done + ' из ' + intakes.length + ' приёмов</p>' +
-    '<div class="week">' + DAY_NAMES.map(function (d, i) {
-      var dots = "";
-      for (var k = 0; k < Math.min(weekDots(i), 4); k++) dots += "<span></span>";
-      return '<div class="wday' + (i === tIdx ? " today" : "") + '"><div class="lbl">' + d + '</div><div class="dots">' + dots + '</div></div>';
-    }).join("") + '</div>';
+    '<h1>' + title + '</h1>' +
+    '<p class="sub" style="margin-bottom:' + (isToday ? '18' : '6') + 'px">' + sub + '</p>' +
+    (!isToday ? '<p style="margin:0 0 14px"><button class="link-btn" id="back-today">← вернуться к сегодня</button></p>' : '') +
+    '<div class="week">' + week + '</div>';
 
   if (intakes.length === 0) {
-    html += '<div class="empty"><div class="emoji">💊</div><p>На сегодня приёмов нет</p><p class="hint">Добавь первое лекарство кнопкой «+»</p></div>';
+    html += '<div class="empty"><div class="emoji">💊</div><p>' + (isToday ? "На сегодня приёмов нет" : "В этот день приёмов нет") + '</p>' +
+      (meds.length === 0 ? '<p class="hint">Добавь первое лекарство кнопкой «+»</p>' : '') + '</div>';
   }
 
   intakes.forEach(function (it) {
-    var rec = taken[it.key], isTaken = !!rec, soon = !isTaken && it.time <= nowStr;
+    var rec = taken[it.key], isTaken = !!rec;
+    var soon = isToday && !isTaken && it.time <= nowStr;
+    var missed = isPast && !isTaken;
+    var doseLine = it.n + " шт" + (it.med.doseNote ? " · " + esc(it.med.doseNote) : "");
+    var cardCls = isTaken ? " taken" : missed ? " missed" : soon ? " soon" : "";
+
+    var btn;
+    if (isFuture) {
+      btn = '<button class="pill-btn locked" aria-label="Ещё не наступил"><span class="pill-shape" style="background:' + esc(it.med.color) + '"></span></button>';
+    } else {
+      btn = '<button class="pill-btn' + (isTaken ? " done" : "") + (justTaken === it.key ? " popping" : "") + '" data-take="' + esc(it.key) + '" ' +
+        'aria-label="' + (isTaken ? "Принято, нажми чтобы отменить" : "Отметить приём: " + esc(it.med.name)) + '">' +
+        (isTaken ? '<span class="check">✓</span>' : '<span class="pill-shape" style="background:' + esc(it.med.color) + '"></span>') +
+        '</button>';
+    }
+
+    var status;
+    if (isTaken) status = '<div class="status taken-at">' + (rec.retro ? "отмечено позже" : "выпил в " + esc(rec.at)) + '</div>';
+    else if (isFuture) status = '<div class="status">запланировано</div>';
+    else if (missed) status = '<div class="status miss">пропущено — нажми, если пил</div>';
+    else status = '<div class="status">' + (soon ? "пора!" : "позже") + '</div>';
+
     html +=
-      '<div class="card' + (isTaken ? " taken" : soon ? " soon" : "") + '">' +
-        '<button class="pill-btn' + (isTaken ? " done" : "") + (justTaken === it.key ? " popping" : "") + '" data-take="' + esc(it.key) + '" ' +
-          'aria-label="' + (isTaken ? "Принято, нажми чтобы отменить" : "Отметить приём: " + esc(it.med.name)) + '">' +
-          (isTaken ? '<span class="check">✓</span>' : '<span class="pill-shape" style="background:' + esc(it.med.color) + '"></span>') +
-        '</button>' +
+      '<div class="card' + cardCls + '">' + btn +
         '<div class="info">' +
           '<div class="med-name">' + esc(it.med.name) + '</div>' +
-          '<div class="med-dose">' + esc(it.med.dose) + '</div>' +
-          (it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + it.med.stock + ' шт — пора купить</div>' : '') +
+          '<div class="med-dose">' + doseLine + '</div>' +
+          (isToday && it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + it.med.stock + ' шт — пора купить</div>' : '') +
         '</div>' +
-        '<div class="right">' +
-          '<div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' +
-          (isTaken
-            ? '<div class="status taken-at">выпил в ' + esc(rec.at) + '</div>'
-            : '<div class="status">' + (soon ? "пора!" : "позже") + '</div>') +
-        '</div>' +
+        '<div class="right"><div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' + status + '</div>' +
       '</div>';
   });
   return html;
@@ -262,6 +345,7 @@ function renderMeds() {
   }
   meds.forEach(function (m) {
     var low = m.stock <= 5;
+    var timesTxt = m.times.map(function (x) { return x.t + " (" + x.n + " шт)"; }).join(", ");
     html +=
       '<div class="card" style="display:block">' +
         '<div style="display:flex; align-items:center; gap:10px">' +
@@ -269,8 +353,8 @@ function renderMeds() {
           '<div style="flex:1">' +
             '<div class="med-name">' + esc(m.name) + '</div>' +
             '<div style="font-size:13.5px; color:var(--mute); font-weight:600">' +
-              esc(m.dose) + ' · ' + m.times.map(esc).join(", ") + ' · ' +
-              (m.days.length === 7 ? "каждый день" : m.days.map(function (d) { return DAY_NAMES[d]; }).join(" ")) +
+              timesTxt + ' · ' + schedText(m) +
+              (m.doseNote ? ' · ' + esc(m.doseNote) : '') +
               (m.courseDays ? ' · курс ' + m.courseDays + ' дн.' : ' · постоянно') +
             '</div>' +
           '</div>' +
@@ -292,35 +376,61 @@ function renderMeds() {
 // ─── Экран «Добавить» ───
 var form = null;
 function blankForm() {
-  return { name: "", dose: "1 таблетка", times: ["09:00"], days: [0,1,2,3,4,5,6], pack: 30, forever: true, courseN: 14 };
+  return { name: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
+           days: [0,1,2,3,4,5,6], every: 2, pack: 30, forever: true, courseN: 14 };
 }
 function renderAdd() {
   var f = form;
-  return '<h1 style="font-size:24px">Новое лекарство</h1>' +
+  var html = '<h1 style="font-size:24px">Новое лекарство</h1>' +
     '<p class="sub" style="margin-bottom:0">Пара шагов — и напоминания готовы</p>' +
     '<label>Название</label>' +
     '<input class="inp" id="f-name" value="' + esc(f.name) + '" placeholder="Например, Витамин C">' +
-    '<label>Дозировка</label>' +
-    '<input class="inp" id="f-dose" value="' + esc(f.dose) + '">' +
-    '<label>Время приёма</label>' +
-    f.times.map(function (t, i) {
-      return '<input type="time" class="inp f-time" data-i="' + i + '" value="' + esc(t) + '" style="margin-bottom:8px">';
-    }).join("") +
-    '<button class="link-btn" id="f-addtime">+ добавить время</button>' +
-    '<label>Дни приёма</label>' +
-    '<div class="day-chips">' + DAY_NAMES.map(function (d, i) {
+
+    '<label>Время и количество на приём</label>';
+  f.times.forEach(function (tm, i) {
+    html += '<div class="time-row">' +
+      '<input type="time" class="inp t f-time" data-i="' + i + '" value="' + esc(tm.t) + '">' +
+      '<input type="number" min="1" class="inp n f-n" data-i="' + i + '" value="' + tm.n + '" placeholder="шт">' +
+      (f.times.length > 1 ? '<button class="del f-del" data-i="' + i + '" aria-label="Убрать время">✕</button>' : '') +
+    '</div>';
+  });
+  html += '<button class="link-btn" id="f-addtime">+ добавить время</button>' +
+    '<p class="hint-line">Например: 09:00 — 2 шт и 21:00 — 2 шт</p>' +
+
+    '<label>Расписание</label>' +
+    '<div class="chips2">' +
+      '<button class="chip' + (f.mode === "weekly" ? " on" : "") + '" id="f-weekly">По дням недели</button>' +
+      '<button class="chip' + (f.mode === "interval" ? " on" : "") + '" id="f-interval">Интервалом</button>' +
+    '</div>';
+
+  if (f.mode === "weekly") {
+    html += '<div class="day-chips" style="margin-top:8px">' + DAY_NAMES.map(function (d, i) {
       return '<button class="day-chip' + (f.days.indexOf(i) !== -1 ? " on" : "") + '" data-day="' + i + '">' + d + '</button>';
-    }).join("") + '</div>' +
+    }).join("") + '</div>';
+  } else {
+    html += '<input type="number" min="1" class="inp" id="f-every" value="' + f.every + '" style="margin-top:8px">' +
+      '<p class="hint-line">1 — каждый день, 2 — через день, 3 — каждые 3 дня… Отсчёт с сегодняшнего дня.</p>';
+  }
+
+  html += '<label>Примечание (необязательно)</label>' +
+    '<input class="inp" id="f-note" value="' + esc(f.doseNote) + '" placeholder="Например: после еды, запить водой">' +
+
     '<label>Длительность</label>' +
     '<div class="chips2">' +
       '<button class="chip' + (f.forever ? " on" : "") + '" id="f-forever">Постоянно</button>' +
       '<button class="chip' + (!f.forever ? " on" : "") + '" id="f-course">Курсом</button>' +
     '</div>' +
     (!f.forever ? '<input type="number" min="1" class="inp" id="f-coursen" value="' + f.courseN + '" style="margin-top:8px" placeholder="Сколько дней">' : '') +
+
     '<label>Сколько штук в упаковке</label>' +
     '<input type="number" min="1" class="inp" id="f-pack" value="' + f.pack + '">' +
-    '<button class="btn-main" id="f-save"' + (f.name.trim() && f.days.length ? '' : ' disabled') + '>Сохранить</button>' +
+
+    '<button class="btn-main" id="f-save"' + (formValid() ? '' : ' disabled') + '>Сохранить</button>' +
     '<button class="btn-ghost" id="f-cancel">Отмена</button>';
+  return html;
+}
+function formValid() {
+  return form.name.trim() && (form.mode === "interval" || form.days.length > 0);
 }
 
 // ─── Рендер и события ───
@@ -344,31 +454,46 @@ function render() {
 function readForm() {
   var g = function (id) { return document.getElementById(id); };
   if (g("f-name")) form.name = g("f-name").value;
-  if (g("f-dose")) form.dose = g("f-dose").value;
-  document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i] = inp.value || "09:00"; });
+  if (g("f-note")) form.doseNote = g("f-note").value;
+  document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i].t = inp.value || "09:00"; });
+  document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = Math.max(1, +inp.value || 1); });
+  if (g("f-every")) form.every = Math.max(1, +g("f-every").value || 1);
   if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
   if (g("f-coursen")) form.courseN = Math.max(1, +g("f-coursen").value || 14);
 }
 
 function bindEvents() {
-  // Отметка приёма / отмена
+  // Выбор дня в недельной ленте
+  el.querySelectorAll("[data-date]").forEach(function (cell) {
+    cell.onclick = function () { selectedKey = cell.dataset.date; render(); };
+  });
+  var back = document.getElementById("back-today");
+  if (back) back.onclick = function () { selectedKey = dateKey(); render(); };
+
+  // Отметка приёма / отмена (сегодня и прошлые дни)
   el.querySelectorAll("[data-take]").forEach(function (btn) {
     btn.onclick = function () {
       var key = btn.dataset.take;
       var medId = +key.split("@")[0];
+      var taken = loadTakenFor(selectedKey);
+      var med = meds.find(function (m) { return m.id === medId; });
+      var tm = med ? med.times.find(function (x) { return med.id + "@" + x.t === key; }) : null;
+      var n = tm ? tm.n : 1;
+
       if (taken[key]) {
         if (!confirm("Отменить отметку о приёме?")) return;
         delete taken[key];
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.min(m.pack, m.stock + 1) }) : m; });
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: m.stock + n }) : m; });
         justTaken = null;
       } else {
-        taken[key] = { at: hhmm(new Date()) };
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, m.stock - 1) }) : m; });
+        var retro = selectedKey < dateKey();
+        taken[key] = retro ? { at: hhmm(new Date()), retro: true } : { at: hhmm(new Date()) };
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, m.stock - n) }) : m; });
         justTaken = key;
         setTimeout(function () { justTaken = null; }, 700);
         if (navigator.vibrate) navigator.vibrate(30);
       }
-      saveTaken(taken); saveMeds(meds); render();
+      saveTakenFor(selectedKey, taken); saveMeds(meds); render();
     };
   });
 
@@ -393,13 +518,17 @@ function bindEvents() {
   // Форма добавления
   if (screen === "add") {
     var g = function (id) { return document.getElementById(id); };
-    ["f-name", "f-dose"].forEach(function (id) {
-      g(id).oninput = function () { readForm(); g("f-save").disabled = !(form.name.trim() && form.days.length); };
+    ["f-name", "f-note"].forEach(function (id) {
+      g(id).oninput = function () { readForm(); g("f-save").disabled = !formValid(); };
     });
-    document.querySelectorAll(".f-time").forEach(function (inp) { inp.onchange = readForm; });
+    document.querySelectorAll(".f-time,.f-n").forEach(function (inp) { inp.onchange = readForm; });
     g("f-pack").onchange = readForm;
+    if (g("f-every")) g("f-every").onchange = readForm;
     if (g("f-coursen")) g("f-coursen").onchange = readForm;
-    g("f-addtime").onclick = function () { readForm(); form.times.push("21:00"); render(); };
+    g("f-addtime").onclick = function () { readForm(); form.times.push({ t: "21:00", n: form.times[0].n }); render(); };
+    document.querySelectorAll(".f-del").forEach(function (btn) {
+      btn.onclick = function () { readForm(); form.times.splice(+btn.dataset.i, 1); render(); };
+    });
     document.querySelectorAll("[data-day]").forEach(function (btn) {
       btn.onclick = function () {
         readForm();
@@ -409,19 +538,23 @@ function bindEvents() {
         render();
       };
     });
+    g("f-weekly").onclick = function () { readForm(); form.mode = "weekly"; render(); };
+    g("f-interval").onclick = function () { readForm(); form.mode = "interval"; render(); };
     g("f-forever").onclick = function () { readForm(); form.forever = true; render(); };
     g("f-course").onclick = function () { readForm(); form.forever = false; render(); };
     g("f-save").onclick = function () {
       readForm();
-      if (!(form.name.trim() && form.days.length)) return;
+      if (!formValid()) return;
       meds.push({
-        id: Date.now(), name: form.name.trim(), dose: form.dose, times: form.times.slice(),
-        days: form.days.slice(), stock: form.pack, pack: form.pack,
+        id: Date.now(), name: form.name.trim(), doseNote: form.doseNote.trim(),
+        times: form.times.map(function (x) { return { t: x.t, n: x.n }; }),
+        mode: form.mode, days: form.days.slice(), every: form.every,
+        start: dateKey(), stock: form.pack, pack: form.pack,
         courseDays: form.forever ? null : form.courseN,
         color: PILL_COLORS[Math.floor(Math.random() * PILL_COLORS.length)],
       });
       saveMeds(meds); syncNotifications();
-      screen = "today"; render();
+      screen = "today"; selectedKey = dateKey(); render();
     };
     g("f-cancel").onclick = function () { screen = "today"; render(); };
   }
@@ -429,18 +562,19 @@ function bindEvents() {
 
 fab.onclick = function () { form = blankForm(); screen = "add"; render(); };
 nav.querySelectorAll("button").forEach(function (b) {
-  b.onclick = function () { screen = b.dataset.nav; render(); };
+  b.onclick = function () {
+    screen = b.dataset.nav;
+    if (screen === "today") selectedKey = dateKey(); // возврат к сегодняшнему дню
+    render();
+  };
 });
 
-// Обновляем статусы «пора!» раз в 30 секунд и при смене даты
-setInterval(function () {
-  var freshTaken = loadTaken();
-  taken = freshTaken; // после полуночи ключ сменится — отметки обнулятся
-  if (screen === "today") render();
-}, 30000);
+// Обновляем статусы «пора!» раз в 30 секунд
+setInterval(function () { if (screen === "today") render(); }, 30000);
 
 // ─── Локальные уведомления (Capacitor) ───
-// В браузере тихо пропускается; в Android-обёртке — планирует напоминания.
+// Планируем конкретные напоминания на 14 дней вперёд (это покрывает и интервальные
+// схемы вроде «через день»). Список пересоздаётся при каждом открытии приложения.
 async function syncNotifications() {
   var LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
   if (!LN) return;
@@ -451,22 +585,24 @@ async function syncNotifications() {
     if (pending.notifications && pending.notifications.length) {
       await LN.cancel({ notifications: pending.notifications.map(function (n) { return { id: n.id }; }) });
     }
-    var notifs = [], id = 1;
-    meds.forEach(function (m) {
-      m.times.forEach(function (t) {
-        var parts = t.split(":");
-        m.days.forEach(function (d) {
-          // Capacitor: weekday 1 = воскресенье … 7 = суббота; у нас 0 = ПН … 6 = ВС
-          var weekday = d === 6 ? 1 : d + 2;
+    var notifs = [], id = 1, now = new Date();
+    for (var off = 0; off < 14; off++) {
+      var d = new Date(); d.setDate(d.getDate() + off);
+      meds.forEach(function (m) {
+        if (!occursOn(m, d)) return;
+        m.times.forEach(function (tm) {
+          var parts = tm.t.split(":");
+          var when = new Date(d.getFullYear(), d.getMonth(), d.getDate(), +parts[0], +parts[1], 0);
+          if (when <= now) return;
           notifs.push({
             id: id++,
             title: "Пора принять лекарство 💊",
-            body: m.name + " — " + m.dose,
-            schedule: { on: { weekday: weekday, hour: +parts[0], minute: +parts[1] }, allowWhileIdle: true },
+            body: m.name + " — " + tm.n + " шт" + (m.doseNote ? " (" + m.doseNote + ")" : ""),
+            schedule: { at: when, allowWhileIdle: true },
           });
         });
       });
-    });
+    }
     if (notifs.length) await LN.schedule({ notifications: notifs });
   } catch (e) { console.warn("notifications:", e); }
 }
