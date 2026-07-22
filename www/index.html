@@ -127,6 +127,8 @@
     border:2px solid var(--line); background:var(--card); color:var(--mute);
   }
   .chip.on{ border-color:var(--green); background:var(--green); color:#fff; }
+  .chips-wrap{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chips-wrap .chip{ flex:none; padding:10px 14px; font-size:13px; }
   .btn-main{
     width:100%; margin-top:24px; padding:16px 0; border-radius:99px; border:none;
     background:var(--green); color:#fff; font-weight:900; font-size:17px; cursor:pointer;
@@ -169,6 +171,10 @@
 // ─── Константы ───
 var PILL_COLORS = ["#7FB69B", "#E8A13C", "#8FA8D9", "#D98FB0", "#B69B7F"];
 var DAY_NAMES = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
+var REMIND_OPTS = [
+  { v: 0, l: "В момент приёма" }, { v: 10, l: "За 10 мин" }, { v: 30, l: "За 30 мин" },
+  { v: 60, l: "За 1 час" }, { v: 120, l: "За 2 часа" }
+];
 
 // ─── Даты ───
 function pad(n) { return String(n).padStart(2, "0"); }
@@ -215,6 +221,7 @@ var justTaken = null;
     if (!nm.mode) { nm.mode = "weekly"; changed = true; }
     if (!nm.start) { nm.start = dateKey(); changed = true; }
     if (nm.every == null) { nm.every = 2; changed = true; }
+    if (nm.remindOffsets == null) { nm.remindOffsets = [nm.remindBefore || 0]; delete nm.remindBefore; changed = true; }
     if (nm.doseNote == null) nm.doseNote = "";
     return nm;
   });
@@ -251,6 +258,16 @@ function schedText(m) {
     return m.every === 1 ? "каждый день" : m.every === 2 ? "через день" : "каждые " + m.every + " дн.";
   }
   return m.days.length === 7 ? "каждый день" : m.days.map(function (d) { return DAY_NAMES[d]; }).join(" ");
+}
+
+function remindText(m) {
+  var o = m.remindOffsets || [];
+  if (!o.length) return "без напоминаний";
+  return "напомнит: " + o.map(function (v) {
+    if (v === 0) return "в момент";
+    if (v % 60 === 0) return "за " + (v / 60) + " ч";
+    return "за " + v + " мин";
+  }).join(", ");
 }
 
 // ─── Экран «Сегодня» (с просмотром любого дня недели) ───
@@ -354,6 +371,8 @@ function renderMeds() {
             '<div class="med-name">' + esc(m.name) + '</div>' +
             '<div style="font-size:13.5px; color:var(--mute); font-weight:600">' +
               timesTxt + ' · ' + schedText(m) +
+              (m.start > dateKey() ? ' · с ' + parseKey(m.start).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : '') +
+              ' · ' + remindText(m) +
               (m.doseNote ? ' · ' + esc(m.doseNote) : '') +
               (m.courseDays ? ' · курс ' + m.courseDays + ' дн.' : ' · постоянно') +
             '</div>' +
@@ -377,7 +396,8 @@ function renderMeds() {
 var form = null;
 function blankForm() {
   return { name: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
-           days: [0,1,2,3,4,5,6], every: 2, pack: 30, forever: true, courseN: 14 };
+           days: [0,1,2,3,4,5,6], every: 2, start: dateKey(), remindOffsets: [0],
+           pack: 30, forever: true, courseN: 14 };
 }
 function renderAdd() {
   var f = form;
@@ -412,7 +432,19 @@ function renderAdd() {
       '<p class="hint-line">1 — каждый день, 2 — через день, 3 — каждые 3 дня… Отсчёт с сегодняшнего дня.</p>';
   }
 
-  html += '<label>Примечание (необязательно)</label>' +
+  html += '<label>Дата начала</label>' +
+    '<input type="date" class="inp" id="f-start" value="' + esc(f.start) + '">' +
+    '<p class="hint-line">' + (f.mode === "interval"
+      ? "Для схемы «через день» задаёт точку отсчёта — поставь завтрашнюю дату, если начинаешь с завтра."
+      : "До этой даты приёмов и напоминаний не будет.") + '</p>' +
+
+    '<label>Напоминания</label>' +
+    '<div class="chips-wrap">' + REMIND_OPTS.map(function (o) {
+      return '<button class="chip' + (f.remindOffsets.indexOf(o.v) !== -1 ? " on" : "") + '" data-remind="' + o.v + '">' + o.l + '</button>';
+    }).join("") + '</div>' +
+    '<p class="hint-line">Можно выбрать несколько. Если ничего не выбрано — напоминаний не будет. После отметки «выпил» оставшиеся напоминания этого приёма не приходят.</p>' +
+
+    '<label>Примечание (необязательно)</label>' +
     '<input class="inp" id="f-note" value="' + esc(f.doseNote) + '" placeholder="Например: после еды, запить водой">' +
 
     '<label>Длительность</label>' +
@@ -458,6 +490,7 @@ function readForm() {
   document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i].t = inp.value || "09:00"; });
   document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = Math.max(1, +inp.value || 1); });
   if (g("f-every")) form.every = Math.max(1, +g("f-every").value || 1);
+  if (g("f-start")) form.start = g("f-start").value || dateKey();
   if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
   if (g("f-coursen")) form.courseN = Math.max(1, +g("f-coursen").value || 14);
 }
@@ -493,7 +526,7 @@ function bindEvents() {
         setTimeout(function () { justTaken = null; }, 700);
         if (navigator.vibrate) navigator.vibrate(30);
       }
-      saveTakenFor(selectedKey, taken); saveMeds(meds); render();
+      saveTakenFor(selectedKey, taken); saveMeds(meds); syncNotifications(); render();
     };
   });
 
@@ -524,6 +557,16 @@ function bindEvents() {
     document.querySelectorAll(".f-time,.f-n").forEach(function (inp) { inp.onchange = readForm; });
     g("f-pack").onchange = readForm;
     if (g("f-every")) g("f-every").onchange = readForm;
+    if (g("f-start")) g("f-start").onchange = readForm;
+    document.querySelectorAll("[data-remind]").forEach(function (btn) {
+      btn.onclick = function () {
+        readForm();
+        var v = +btn.dataset.remind, at = form.remindOffsets.indexOf(v);
+        if (at === -1) form.remindOffsets.push(v); else form.remindOffsets.splice(at, 1);
+        form.remindOffsets.sort(function (a, b) { return a - b; });
+        render();
+      };
+    });
     if (g("f-coursen")) g("f-coursen").onchange = readForm;
     g("f-addtime").onclick = function () { readForm(); form.times.push({ t: "21:00", n: form.times[0].n }); render(); };
     document.querySelectorAll(".f-del").forEach(function (btn) {
@@ -549,7 +592,8 @@ function bindEvents() {
         id: Date.now(), name: form.name.trim(), doseNote: form.doseNote.trim(),
         times: form.times.map(function (x) { return { t: x.t, n: x.n }; }),
         mode: form.mode, days: form.days.slice(), every: form.every,
-        start: dateKey(), stock: form.pack, pack: form.pack,
+        start: form.start || dateKey(), remindOffsets: form.remindOffsets.slice(),
+        stock: form.pack, pack: form.pack,
         courseDays: form.forever ? null : form.courseN,
         color: PILL_COLORS[Math.floor(Math.random() * PILL_COLORS.length)],
       });
@@ -588,21 +632,29 @@ async function syncNotifications() {
     var notifs = [], id = 1, now = new Date();
     for (var off = 0; off < 14; off++) {
       var d = new Date(); d.setDate(d.getDate() + off);
+      var dayTaken = loadTakenFor(dateKey(d));
       meds.forEach(function (m) {
         if (!occursOn(m, d)) return;
         m.times.forEach(function (tm) {
+          if (dayTaken[m.id + "@" + tm.t]) return; // уже отмечено «выпил» — не напоминаем
           var parts = tm.t.split(":");
-          var when = new Date(d.getFullYear(), d.getMonth(), d.getDate(), +parts[0], +parts[1], 0);
-          if (when <= now) return;
-          notifs.push({
-            id: id++,
-            title: "Пора принять лекарство 💊",
-            body: m.name + " — " + tm.n + " шт" + (m.doseNote ? " (" + m.doseNote + ")" : ""),
-            schedule: { at: when, allowWhileIdle: true },
+          var base = new Date(d.getFullYear(), d.getMonth(), d.getDate(), +parts[0], +parts[1], 0);
+          (m.remindOffsets || []).forEach(function (mins) {
+            var when = new Date(base.getTime() - mins * 60000);
+            if (when <= now) return;
+            notifs.push({
+              id: id++,
+              title: mins > 0 ? "Скоро приём лекарства ⏰" : "Пора принять лекарство 💊",
+              body: m.name + " — " + tm.n + " шт" +
+                (mins > 0 ? ", приём в " + tm.t : "") +
+                (m.doseNote ? " (" + m.doseNote + ")" : ""),
+              schedule: { at: when, allowWhileIdle: true },
+            });
           });
         });
       });
     }
+    notifs = notifs.slice(0, 450); // запас до системного лимита будильников Android
     if (notifs.length) await LN.schedule({ notifications: notifs });
   } catch (e) { console.warn("notifications:", e); }
 }
