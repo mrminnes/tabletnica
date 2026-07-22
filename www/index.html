@@ -52,6 +52,8 @@
   .card.taken{ border-color:var(--green-soft); opacity:.75; }
   .card.soon{ border-color:var(--amber); }
   .card.missed{ border-color:var(--coral-soft); }
+  .card[data-take]{ cursor:pointer; }
+  .card.flash{ border-color:var(--amber); box-shadow:0 0 0 3px rgba(232,161,60,.25); }
   .pill-btn{
     width:54px; height:54px; border-radius:18px; border:none; cursor:pointer;
     background:var(--green-soft); flex-shrink:0;
@@ -184,6 +186,9 @@ function stripTime(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate
 function diffDays(a, b) { return Math.round((stripTime(b) - stripTime(a)) / 86400000); }
 function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
 function dayIdx(d) { return (d.getDay() + 6) % 7; } // ПН = 0
+function round2(x) { return Math.round(x * 100) / 100; }
+function num(v) { var x = parseFloat(String(v).replace(",", ".")); return isFinite(x) && x > 0 ? round2(x) : 1; }
+function fmtN(n) { return String(n).replace(".", ","); }
 
 // ─── Хранилище ───
 function loadMeds() { try { return JSON.parse(localStorage.getItem("meds")) || []; } catch (e) { return []; } }
@@ -205,6 +210,7 @@ var meds = loadMeds();
 var screen = "today";
 var selectedKey = dateKey();   // выбранный день в недельной ленте
 var justTaken = null;
+var highlightKey = null;       // карточка, в которую «провалились» из уведомления
 
 // Миграция данных из версии 1.0 (не теряем уже введённые лекарства)
 (function migrate() {
@@ -322,15 +328,15 @@ function renderToday() {
     var rec = taken[it.key], isTaken = !!rec;
     var soon = isToday && !isTaken && it.time <= nowStr;
     var missed = isPast && !isTaken;
-    var doseLine = it.n + " шт" + (it.med.doseNote ? " · " + esc(it.med.doseNote) : "");
-    var cardCls = isTaken ? " taken" : missed ? " missed" : soon ? " soon" : "";
+    var doseLine = fmtN(it.n) + " шт" + (it.med.doseNote ? " · " + esc(it.med.doseNote) : "");
+    var cardCls = (isTaken ? " taken" : missed ? " missed" : soon ? " soon" : "") +
+      (it.key === highlightKey && !isTaken ? " flash" : "");
 
     var btn;
     if (isFuture) {
-      btn = '<button class="pill-btn locked" aria-label="Ещё не наступил"><span class="pill-shape" style="background:' + esc(it.med.color) + '"></span></button>';
+      btn = '<button class="pill-btn locked" tabindex="-1" aria-hidden="true"><span class="pill-shape" style="background:' + esc(it.med.color) + '"></span></button>';
     } else {
-      btn = '<button class="pill-btn' + (isTaken ? " done" : "") + (justTaken === it.key ? " popping" : "") + '" data-take="' + esc(it.key) + '" ' +
-        'aria-label="' + (isTaken ? "Принято, нажми чтобы отменить" : "Отметить приём: " + esc(it.med.name)) + '">' +
+      btn = '<button class="pill-btn' + (isTaken ? " done" : "") + (justTaken === it.key ? " popping" : "") + '" tabindex="-1" aria-hidden="true">' +
         (isTaken ? '<span class="check">✓</span>' : '<span class="pill-shape" style="background:' + esc(it.med.color) + '"></span>') +
         '</button>';
     }
@@ -342,11 +348,14 @@ function renderToday() {
     else status = '<div class="status">' + (soon ? "пора!" : "позже") + '</div>';
 
     html +=
-      '<div class="card' + cardCls + '">' + btn +
+      '<div class="card' + cardCls + '" data-key="' + esc(it.key) + '"' +
+        (!isFuture ? ' data-take="' + esc(it.key) + '" role="button" aria-label="' +
+          (isTaken ? "Принято, нажми чтобы отменить" : "Отметить приём: " + esc(it.med.name)) + '"' : '') + '>' +
+        btn +
         '<div class="info">' +
           '<div class="med-name">' + esc(it.med.name) + '</div>' +
           '<div class="med-dose">' + doseLine + '</div>' +
-          (isToday && it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + it.med.stock + ' шт — пора купить</div>' : '') +
+          (isToday && it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + fmtN(it.med.stock) + ' шт — пора купить</div>' : '') +
         '</div>' +
         '<div class="right"><div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' + status + '</div>' +
       '</div>';
@@ -362,7 +371,7 @@ function renderMeds() {
   }
   meds.forEach(function (m) {
     var low = m.stock <= 5;
-    var timesTxt = m.times.map(function (x) { return x.t + " (" + x.n + " шт)"; }).join(", ");
+    var timesTxt = m.times.map(function (x) { return x.t + " (" + fmtN(x.n) + " шт)"; }).join(", ");
     html +=
       '<div class="card" style="display:block">' +
         '<div style="display:flex; align-items:center; gap:10px">' +
@@ -380,7 +389,7 @@ function renderMeds() {
         '</div>' +
         '<div style="margin-top:12px">' +
           '<div class="stock-row"><span style="color:var(--mute)">Запас</span>' +
-            '<span style="color:' + (low ? "var(--coral)" : "var(--green)") + '">' + m.stock + ' из ' + m.pack + ' шт</span></div>' +
+            '<span style="color:' + (low ? "var(--coral)" : "var(--green)") + '">' + fmtN(m.stock) + ' из ' + m.pack + ' шт</span></div>' +
           '<div class="stock-bar' + (low ? " low" : "") + '"><div style="width:' + Math.min(100, (m.stock / m.pack) * 100) + '%"></div></div>' +
         '</div>' +
         '<div class="med-actions">' +
@@ -410,12 +419,12 @@ function renderAdd() {
   f.times.forEach(function (tm, i) {
     html += '<div class="time-row">' +
       '<input type="time" class="inp t f-time" data-i="' + i + '" value="' + esc(tm.t) + '">' +
-      '<input type="number" min="1" class="inp n f-n" data-i="' + i + '" value="' + tm.n + '" placeholder="шт">' +
+      '<input type="text" inputmode="decimal" class="inp n f-n" data-i="' + i + '" value="' + fmtN(tm.n) + '" placeholder="шт">' +
       (f.times.length > 1 ? '<button class="del f-del" data-i="' + i + '" aria-label="Убрать время">✕</button>' : '') +
     '</div>';
   });
   html += '<button class="link-btn" id="f-addtime">+ добавить время</button>' +
-    '<p class="hint-line">Например: 09:00 — 2 шт и 21:00 — 2 шт</p>' +
+    '<p class="hint-line">Можно дробное: 0,5 — полтаблетки. Например: 09:00 — 2 шт и 21:00 — 0,5 шт</p>' +
 
     '<label>Расписание</label>' +
     '<div class="chips2">' +
@@ -488,7 +497,7 @@ function readForm() {
   if (g("f-name")) form.name = g("f-name").value;
   if (g("f-note")) form.doseNote = g("f-note").value;
   document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i].t = inp.value || "09:00"; });
-  document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = Math.max(1, +inp.value || 1); });
+  document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = num(inp.value); });
   if (g("f-every")) form.every = Math.max(1, +g("f-every").value || 1);
   if (g("f-start")) form.start = g("f-start").value || dateKey();
   if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
@@ -516,13 +525,14 @@ function bindEvents() {
       if (taken[key]) {
         if (!confirm("Отменить отметку о приёме?")) return;
         delete taken[key];
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: m.stock + n }) : m; });
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: round2(m.stock + n) }) : m; });
         justTaken = null;
       } else {
         var retro = selectedKey < dateKey();
         taken[key] = retro ? { at: hhmm(new Date()), retro: true } : { at: hhmm(new Date()) };
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, m.stock - n) }) : m; });
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, round2(m.stock - n)) }) : m; });
         justTaken = key;
+        if (highlightKey === key) highlightKey = null;
         setTimeout(function () { justTaken = null; }, 700);
         if (navigator.vibrate) navigator.vibrate(30);
       }
@@ -632,7 +642,8 @@ async function syncNotifications() {
     var notifs = [], id = 1, now = new Date();
     for (var off = 0; off < 14; off++) {
       var d = new Date(); d.setDate(d.getDate() + off);
-      var dayTaken = loadTakenFor(dateKey(d));
+      var dk = dateKey(d);
+      var dayTaken = loadTakenFor(dk);
       meds.forEach(function (m) {
         if (!occursOn(m, d)) return;
         m.times.forEach(function (tm) {
@@ -645,9 +656,10 @@ async function syncNotifications() {
             notifs.push({
               id: id++,
               title: mins > 0 ? "Скоро приём лекарства ⏰" : "Пора принять лекарство 💊",
-              body: m.name + " — " + tm.n + " шт" +
+              body: m.name + " — " + fmtN(tm.n) + " шт" +
                 (mins > 0 ? ", приём в " + tm.t : "") +
                 (m.doseNote ? " (" + m.doseNote + ")" : ""),
+              extra: { date: dk, key: m.id + "@" + tm.t },
               schedule: { at: when, allowWhileIdle: true },
             });
           });
@@ -658,6 +670,22 @@ async function syncNotifications() {
     if (notifs.length) await LN.schedule({ notifications: notifs });
   } catch (e) { console.warn("notifications:", e); }
 }
+
+// Нажатие на уведомление → открываем нужный день и подсвечиваем приём
+(function initNotifTap() {
+  var LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+  if (!LN) return;
+  LN.addListener("localNotificationActionPerformed", function (ev) {
+    var x = ev && ev.notification && ev.notification.extra;
+    if (!x || !x.key) return;
+    screen = "today";
+    selectedKey = x.date || dateKey();
+    highlightKey = x.key;
+    render();
+    var hl = el.querySelector('[data-key="' + highlightKey + '"]');
+    if (hl) hl.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+})();
 
 render();
 syncNotifications();
