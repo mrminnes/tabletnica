@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#F2F8F4">
+<title>Мои таблетки</title>
+<style>
+  :root{
+    --bg:#F2F8F4; --card:#FFFFFF; --ink:#1F2E27; --mute:#6B7F74;
+    --green:#3E7C59; --green-soft:#E3F0E8; --amber:#E8A13C;
+    --coral:#D9603B; --coral-soft:#FBEAE3; --line:#DCE8E0;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg); color:var(--ink); min-height:100vh;
+    font-family:'Nunito', system-ui, -apple-system, sans-serif;
+    display:flex; flex-direction:column;
+  }
+  button,input{ font-family:inherit; }
+  #screen{ flex:1; padding:24px 18px 120px; animation:rise .35s ease both; }
+  @keyframes pop{ 0%{transform:scale(1)} 40%{transform:scale(1.25)} 100%{transform:scale(1)} }
+  @keyframes rise{ from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:translateY(0)} }
+  @media (prefers-reduced-motion: reduce){ #screen{ animation:none } }
+
+  h1{ margin:2px 0 4px; font-size:26px; font-weight:900; }
+  .date{ margin:0; color:var(--mute); font-weight:700; font-size:14px; }
+  .sub{ margin:0 0 18px; color:var(--mute); font-size:15px; font-weight:600; }
+
+  .week{ display:flex; gap:6px; margin-bottom:22px; }
+  .wday{
+    flex:1; border-radius:14px; padding:10px 0 8px; text-align:center;
+    background:var(--card); border:2px solid var(--line); transition:all .2s;
+  }
+  .wday.today{
+    background:var(--green); border-color:var(--green);
+    transform:translateY(-4px); box-shadow:0 6px 14px rgba(62,124,89,.28);
+  }
+  .wday .lbl{ font-size:11px; font-weight:800; color:var(--mute); }
+  .wday.today .lbl{ color:#fff; }
+  .dots{ display:flex; gap:2px; justify-content:center; margin-top:5px; min-height:5px; }
+  .dots span{ width:4px; height:4px; border-radius:99px; background:#B8CDC0; }
+  .wday.today .dots span{ background:#CFE8DA; }
+
+  .card{
+    background:var(--card); border-radius:20px; padding:14px; margin-bottom:12px;
+    display:flex; align-items:center; gap:12px; border:2px solid var(--line); transition:all .25s;
+  }
+  .card.taken{ border-color:var(--green-soft); opacity:.75; }
+  .card.soon{ border-color:var(--amber); }
+  .pill-btn{
+    width:54px; height:54px; border-radius:18px; border:none; cursor:pointer;
+    background:var(--green-soft); flex-shrink:0;
+    box-shadow:inset 0 -3px 0 rgba(62,124,89,.15);
+  }
+  .pill-btn.done{ background:var(--green); box-shadow:inset 0 2px 6px rgba(0,0,0,.15); }
+  .pill-btn.popping{ animation:pop .5s ease; }
+  .pill-btn .check{ color:#fff; font-size:24px; font-weight:900; }
+  .pill-shape{
+    display:inline-block; width:26px; height:14px; border-radius:99px;
+    box-shadow:0 2px 4px rgba(0,0,0,.18);
+  }
+  .card .info{ flex:1; min-width:0; }
+  .med-name{ font-weight:800; font-size:17px; }
+  .card.taken .med-name{ text-decoration:line-through; }
+  .med-dose{ font-size:14px; color:var(--mute); font-weight:600; }
+  .low-badge{
+    margin-top:4px; display:inline-block; background:var(--coral-soft); color:var(--coral);
+    font-size:12px; font-weight:800; border-radius:99px; padding:2px 10px;
+  }
+  .card .right{ text-align:right; flex-shrink:0; }
+  .time{ font-weight:900; font-size:16px; }
+  .time.soon{ color:var(--amber); }
+  .status{ font-size:12px; color:var(--mute); font-weight:700; }
+  .status.taken-at{ color:var(--green); }
+
+  .empty{
+    background:var(--card); border-radius:20px; padding:28px; text-align:center;
+    border:2px dashed var(--line);
+  }
+  .empty .emoji{ font-size:34px; }
+  .empty p{ margin:8px 0 4px; font-weight:800; }
+  .empty .hint{ color:var(--mute); font-size:14px; font-weight:600; margin:0; }
+
+  .stock-row{ display:flex; justify-content:space-between; font-size:13px; font-weight:800; margin-bottom:5px; }
+  .stock-bar{ height:8px; border-radius:99px; background:var(--green-soft); overflow:hidden; }
+  .stock-bar div{ height:100%; background:var(--green); border-radius:99px; transition:width .3s; }
+  .stock-bar.low div{ background:var(--coral); }
+  .med-actions{ display:flex; gap:8px; margin-top:12px; }
+  .btn-small{
+    flex:1; padding:10px 0; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;
+    border:2px solid var(--line); background:var(--card); color:var(--mute);
+  }
+  .btn-small.primary{ border-color:var(--green); color:var(--green); }
+  .btn-small.danger{ border-color:var(--coral-soft); color:var(--coral); }
+
+  label{ font-size:13.5px; font-weight:800; color:var(--mute); margin:16px 0 6px; display:block; }
+  .inp{
+    width:100%; padding:13px 14px; border-radius:14px; border:2px solid var(--line);
+    font-size:16px; font-weight:700; color:var(--ink); background:var(--card); outline:none;
+  }
+  .inp:focus{ border-color:var(--green); }
+  .link-btn{ border:none; background:none; color:var(--green); font-weight:800; font-size:14px; cursor:pointer; padding:0; }
+  .day-chips{ display:flex; gap:6px; }
+  .day-chip{
+    flex:1; padding:10px 0; border-radius:12px; font-weight:800; font-size:12px; cursor:pointer;
+    border:2px solid var(--line); background:var(--card); color:var(--mute);
+  }
+  .day-chip.on{ border-color:var(--green); background:var(--green); color:#fff; }
+  .chips2{ display:flex; gap:8px; }
+  .chip{
+    flex:1; padding:12px 0; border-radius:14px; font-weight:800; font-size:14px; cursor:pointer;
+    border:2px solid var(--line); background:var(--card); color:var(--mute);
+  }
+  .chip.on{ border-color:var(--green); background:var(--green); color:#fff; }
+  .btn-main{
+    width:100%; margin-top:24px; padding:16px 0; border-radius:99px; border:none;
+    background:var(--green); color:#fff; font-weight:900; font-size:17px; cursor:pointer;
+  }
+  .btn-main:disabled{ background:var(--line); color:var(--mute); cursor:not-allowed; }
+  .btn-ghost{
+    width:100%; margin-top:8px; padding:10px 0; border:none; background:none;
+    color:var(--mute); font-weight:700; font-size:14px; cursor:pointer;
+  }
+
+  #fab{
+    position:fixed; right:16px; bottom:calc(86px + env(safe-area-inset-bottom)); z-index:15;
+    width:58px; height:58px; border-radius:20px; border:none; background:var(--green); color:#fff;
+    font-size:30px; font-weight:800; cursor:pointer; line-height:1;
+    box-shadow:0 8px 18px rgba(62,124,89,.4);
+  }
+  #nav{
+    position:fixed; left:0; right:0; bottom:0; background:var(--card);
+    border-top:2px solid var(--line); display:flex; z-index:10;
+    padding:10px 0 calc(14px + env(safe-area-inset-bottom));
+  }
+  #nav button{
+    flex:1; border:none; background:none; cursor:pointer;
+    color:var(--mute); font-weight:800; font-size:12.5px;
+  }
+  #nav button.active{ color:var(--green); }
+  #nav .icon{ font-size:20px; }
+</style>
+</head>
+<body>
+  <div id="screen"></div>
+  <button id="fab" aria-label="Добавить лекарство">+</button>
+  <div id="nav">
+    <button data-nav="today"><div class="icon">🕘</div>Сегодня</button>
+    <button data-nav="meds"><div class="icon">💊</div>Лекарства</button>
+  </div>
+
+<script>
+"use strict";
+// ─── Константы ───
+var PILL_COLORS = ["#7FB69B", "#E8A13C", "#8FA8D9", "#D98FB0", "#B69B7F"];
+var DAY_NAMES = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
+
+// ─── Хранилище (localStorage) ───
+function loadMeds() {
+  try { return JSON.parse(localStorage.getItem("meds")) || []; } catch (e) { return []; }
+}
+function saveMeds(m) { localStorage.setItem("meds", JSON.stringify(m)); }
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function dateKey(d) { d = d || new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+function takenStoreKey() { return "taken:" + dateKey(); }
+function loadTaken() {
+  try { return JSON.parse(localStorage.getItem(takenStoreKey())) || {}; } catch (e) { return {}; }
+}
+function saveTaken(t) { localStorage.setItem(takenStoreKey(), JSON.stringify(t)); }
+
+// Чистим отметки старше 60 дней, чтобы не копить мусор
+(function cleanup() {
+  var limit = new Date(); limit.setDate(limit.getDate() - 60);
+  for (var i = localStorage.length - 1; i >= 0; i--) {
+    var k = localStorage.key(i);
+    if (k && k.indexOf("taken:") === 0 && k.slice(6) < dateKey(limit)) localStorage.removeItem(k);
+  }
+})();
+
+// ─── Состояние ───
+var meds = loadMeds();
+var taken = loadTaken();
+var screen = "today";
+var justTaken = null;
+
+function todayIdx() { return (new Date().getDay() + 6) % 7; } // ПН = 0
+function hhmm(d) { return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+function todayIntakes() {
+  var t = todayIdx(), list = [];
+  meds.forEach(function (m) {
+    if (m.days.indexOf(t) !== -1) m.times.forEach(function (time) {
+      list.push({ med: m, time: time, key: m.id + "@" + time });
+    });
+  });
+  return list.sort(function (a, b) { return a.time.localeCompare(b.time); });
+}
+
+// ─── Экран «Сегодня» ───
+function renderToday() {
+  var now = new Date(), nowStr = hhmm(now), tIdx = todayIdx();
+  var dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  var intakes = todayIntakes();
+  var done = intakes.filter(function (i) { return taken[i.key]; }).length;
+
+  var weekDots = function (d) {
+    return meds.reduce(function (n, m) {
+      return n + (m.days.indexOf(d) !== -1 ? Math.min(m.times.length, 3) : 0);
+    }, 0);
+  };
+
+  var html = '<p class="date">' + esc(dateStr) + '</p>' +
+    '<h1>' + (done === intakes.length && intakes.length > 0 ? "Всё принято 🎉" : "Пора заботиться о себе") + '</h1>' +
+    '<p class="sub">Сегодня: ' + done + ' из ' + intakes.length + ' приёмов</p>' +
+    '<div class="week">' + DAY_NAMES.map(function (d, i) {
+      var dots = "";
+      for (var k = 0; k < Math.min(weekDots(i), 4); k++) dots += "<span></span>";
+      return '<div class="wday' + (i === tIdx ? " today" : "") + '"><div class="lbl">' + d + '</div><div class="dots">' + dots + '</div></div>';
+    }).join("") + '</div>';
+
+  if (intakes.length === 0) {
+    html += '<div class="empty"><div class="emoji">💊</div><p>На сегодня приёмов нет</p><p class="hint">Добавь первое лекарство кнопкой «+»</p></div>';
+  }
+
+  intakes.forEach(function (it) {
+    var rec = taken[it.key], isTaken = !!rec, soon = !isTaken && it.time <= nowStr;
+    html +=
+      '<div class="card' + (isTaken ? " taken" : soon ? " soon" : "") + '">' +
+        '<button class="pill-btn' + (isTaken ? " done" : "") + (justTaken === it.key ? " popping" : "") + '" data-take="' + esc(it.key) + '" ' +
+          'aria-label="' + (isTaken ? "Принято, нажми чтобы отменить" : "Отметить приём: " + esc(it.med.name)) + '">' +
+          (isTaken ? '<span class="check">✓</span>' : '<span class="pill-shape" style="background:' + esc(it.med.color) + '"></span>') +
+        '</button>' +
+        '<div class="info">' +
+          '<div class="med-name">' + esc(it.med.name) + '</div>' +
+          '<div class="med-dose">' + esc(it.med.dose) + '</div>' +
+          (it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + it.med.stock + ' шт — пора купить</div>' : '') +
+        '</div>' +
+        '<div class="right">' +
+          '<div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' +
+          (isTaken
+            ? '<div class="status taken-at">выпил в ' + esc(rec.at) + '</div>'
+            : '<div class="status">' + (soon ? "пора!" : "позже") + '</div>') +
+        '</div>' +
+      '</div>';
+  });
+  return html;
+}
+
+// ─── Экран «Мои лекарства» ───
+function renderMeds() {
+  var html = '<h1 style="margin-bottom:16px">Мои лекарства</h1>';
+  if (meds.length === 0) {
+    html += '<div class="empty"><div class="emoji">💊</div><p>Список пуст</p><p class="hint">Добавь лекарство кнопкой «+»</p></div>';
+  }
+  meds.forEach(function (m) {
+    var low = m.stock <= 5;
+    html +=
+      '<div class="card" style="display:block">' +
+        '<div style="display:flex; align-items:center; gap:10px">' +
+          '<span class="pill-shape" style="width:30px; height:16px; background:' + esc(m.color) + '; flex-shrink:0"></span>' +
+          '<div style="flex:1">' +
+            '<div class="med-name">' + esc(m.name) + '</div>' +
+            '<div style="font-size:13.5px; color:var(--mute); font-weight:600">' +
+              esc(m.dose) + ' · ' + m.times.map(esc).join(", ") + ' · ' +
+              (m.days.length === 7 ? "каждый день" : m.days.map(function (d) { return DAY_NAMES[d]; }).join(" ")) +
+              (m.courseDays ? ' · курс ' + m.courseDays + ' дн.' : ' · постоянно') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:12px">' +
+          '<div class="stock-row"><span style="color:var(--mute)">Запас</span>' +
+            '<span style="color:' + (low ? "var(--coral)" : "var(--green)") + '">' + m.stock + ' из ' + m.pack + ' шт</span></div>' +
+          '<div class="stock-bar' + (low ? " low" : "") + '"><div style="width:' + Math.min(100, (m.stock / m.pack) * 100) + '%"></div></div>' +
+        '</div>' +
+        '<div class="med-actions">' +
+          '<button class="btn-small primary" data-refill="' + m.id + '">Купил упаковку +' + m.pack + '</button>' +
+          '<button class="btn-small danger" data-del="' + m.id + '">Удалить</button>' +
+        '</div>' +
+      '</div>';
+  });
+  return html;
+}
+
+// ─── Экран «Добавить» ───
+var form = null;
+function blankForm() {
+  return { name: "", dose: "1 таблетка", times: ["09:00"], days: [0,1,2,3,4,5,6], pack: 30, forever: true, courseN: 14 };
+}
+function renderAdd() {
+  var f = form;
+  return '<h1 style="font-size:24px">Новое лекарство</h1>' +
+    '<p class="sub" style="margin-bottom:0">Пара шагов — и напоминания готовы</p>' +
+    '<label>Название</label>' +
+    '<input class="inp" id="f-name" value="' + esc(f.name) + '" placeholder="Например, Витамин C">' +
+    '<label>Дозировка</label>' +
+    '<input class="inp" id="f-dose" value="' + esc(f.dose) + '">' +
+    '<label>Время приёма</label>' +
+    f.times.map(function (t, i) {
+      return '<input type="time" class="inp f-time" data-i="' + i + '" value="' + esc(t) + '" style="margin-bottom:8px">';
+    }).join("") +
+    '<button class="link-btn" id="f-addtime">+ добавить время</button>' +
+    '<label>Дни приёма</label>' +
+    '<div class="day-chips">' + DAY_NAMES.map(function (d, i) {
+      return '<button class="day-chip' + (f.days.indexOf(i) !== -1 ? " on" : "") + '" data-day="' + i + '">' + d + '</button>';
+    }).join("") + '</div>' +
+    '<label>Длительность</label>' +
+    '<div class="chips2">' +
+      '<button class="chip' + (f.forever ? " on" : "") + '" id="f-forever">Постоянно</button>' +
+      '<button class="chip' + (!f.forever ? " on" : "") + '" id="f-course">Курсом</button>' +
+    '</div>' +
+    (!f.forever ? '<input type="number" min="1" class="inp" id="f-coursen" value="' + f.courseN + '" style="margin-top:8px" placeholder="Сколько дней">' : '') +
+    '<label>Сколько штук в упаковке</label>' +
+    '<input type="number" min="1" class="inp" id="f-pack" value="' + f.pack + '">' +
+    '<button class="btn-main" id="f-save"' + (f.name.trim() && f.days.length ? '' : ' disabled') + '>Сохранить</button>' +
+    '<button class="btn-ghost" id="f-cancel">Отмена</button>';
+}
+
+// ─── Рендер и события ───
+var el = document.getElementById("screen");
+var fab = document.getElementById("fab");
+var nav = document.getElementById("nav");
+
+function render() {
+  if (screen === "today") el.innerHTML = renderToday();
+  else if (screen === "meds") el.innerHTML = renderMeds();
+  else if (screen === "add") el.innerHTML = renderAdd();
+
+  fab.style.display = screen === "add" ? "none" : "block";
+  nav.style.display = screen === "add" ? "none" : "flex";
+  nav.querySelectorAll("button").forEach(function (b) {
+    b.classList.toggle("active", b.dataset.nav === screen);
+  });
+  bindEvents();
+}
+
+function readForm() {
+  var g = function (id) { return document.getElementById(id); };
+  if (g("f-name")) form.name = g("f-name").value;
+  if (g("f-dose")) form.dose = g("f-dose").value;
+  document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i] = inp.value || "09:00"; });
+  if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
+  if (g("f-coursen")) form.courseN = Math.max(1, +g("f-coursen").value || 14);
+}
+
+function bindEvents() {
+  // Отметка приёма / отмена
+  el.querySelectorAll("[data-take]").forEach(function (btn) {
+    btn.onclick = function () {
+      var key = btn.dataset.take;
+      var medId = +key.split("@")[0];
+      if (taken[key]) {
+        if (!confirm("Отменить отметку о приёме?")) return;
+        delete taken[key];
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.min(m.pack, m.stock + 1) }) : m; });
+        justTaken = null;
+      } else {
+        taken[key] = { at: hhmm(new Date()) };
+        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, m.stock - 1) }) : m; });
+        justTaken = key;
+        setTimeout(function () { justTaken = null; }, 700);
+        if (navigator.vibrate) navigator.vibrate(30);
+      }
+      saveTaken(taken); saveMeds(meds); render();
+    };
+  });
+
+  // Пополнить / удалить
+  el.querySelectorAll("[data-refill]").forEach(function (btn) {
+    btn.onclick = function () {
+      var id = +btn.dataset.refill;
+      meds = meds.map(function (m) { return m.id === id ? Object.assign({}, m, { stock: m.stock + m.pack }) : m; });
+      saveMeds(meds); render();
+    };
+  });
+  el.querySelectorAll("[data-del]").forEach(function (btn) {
+    btn.onclick = function () {
+      var id = +btn.dataset.del;
+      var m = meds.find(function (x) { return x.id === id; });
+      if (!confirm("Удалить «" + (m ? m.name : "") + "»?")) return;
+      meds = meds.filter(function (x) { return x.id !== id; });
+      saveMeds(meds); syncNotifications(); render();
+    };
+  });
+
+  // Форма добавления
+  if (screen === "add") {
+    var g = function (id) { return document.getElementById(id); };
+    ["f-name", "f-dose"].forEach(function (id) {
+      g(id).oninput = function () { readForm(); g("f-save").disabled = !(form.name.trim() && form.days.length); };
+    });
+    document.querySelectorAll(".f-time").forEach(function (inp) { inp.onchange = readForm; });
+    g("f-pack").onchange = readForm;
+    if (g("f-coursen")) g("f-coursen").onchange = readForm;
+    g("f-addtime").onclick = function () { readForm(); form.times.push("21:00"); render(); };
+    document.querySelectorAll("[data-day]").forEach(function (btn) {
+      btn.onclick = function () {
+        readForm();
+        var i = +btn.dataset.day, at = form.days.indexOf(i);
+        if (at === -1) form.days.push(i); else form.days.splice(at, 1);
+        form.days.sort(function (a, b) { return a - b; });
+        render();
+      };
+    });
+    g("f-forever").onclick = function () { readForm(); form.forever = true; render(); };
+    g("f-course").onclick = function () { readForm(); form.forever = false; render(); };
+    g("f-save").onclick = function () {
+      readForm();
+      if (!(form.name.trim() && form.days.length)) return;
+      meds.push({
+        id: Date.now(), name: form.name.trim(), dose: form.dose, times: form.times.slice(),
+        days: form.days.slice(), stock: form.pack, pack: form.pack,
+        courseDays: form.forever ? null : form.courseN,
+        color: PILL_COLORS[Math.floor(Math.random() * PILL_COLORS.length)],
+      });
+      saveMeds(meds); syncNotifications();
+      screen = "today"; render();
+    };
+    g("f-cancel").onclick = function () { screen = "today"; render(); };
+  }
+}
+
+fab.onclick = function () { form = blankForm(); screen = "add"; render(); };
+nav.querySelectorAll("button").forEach(function (b) {
+  b.onclick = function () { screen = b.dataset.nav; render(); };
+});
+
+// Обновляем статусы «пора!» раз в 30 секунд и при смене даты
+setInterval(function () {
+  var freshTaken = loadTaken();
+  taken = freshTaken; // после полуночи ключ сменится — отметки обнулятся
+  if (screen === "today") render();
+}, 30000);
+
+// ─── Локальные уведомления (Capacitor) ───
+// В браузере тихо пропускается; в Android-обёртке — планирует напоминания.
+async function syncNotifications() {
+  var LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+  if (!LN) return;
+  try {
+    var perm = await LN.requestPermissions();
+    if (perm.display !== "granted") return;
+    var pending = await LN.getPending();
+    if (pending.notifications && pending.notifications.length) {
+      await LN.cancel({ notifications: pending.notifications.map(function (n) { return { id: n.id }; }) });
+    }
+    var notifs = [], id = 1;
+    meds.forEach(function (m) {
+      m.times.forEach(function (t) {
+        var parts = t.split(":");
+        m.days.forEach(function (d) {
+          // Capacitor: weekday 1 = воскресенье … 7 = суббота; у нас 0 = ПН … 6 = ВС
+          var weekday = d === 6 ? 1 : d + 2;
+          notifs.push({
+            id: id++,
+            title: "Пора принять лекарство 💊",
+            body: m.name + " — " + m.dose,
+            schedule: { on: { weekday: weekday, hour: +parts[0], minute: +parts[1] }, allowWhileIdle: true },
+          });
+        });
+      });
+    });
+    if (notifs.length) await LN.schedule({ notifications: notifs });
+  } catch (e) { console.warn("notifications:", e); }
+}
+
+render();
+syncNotifications();
+</script>
+</body>
+</html>
