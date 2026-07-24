@@ -784,6 +784,20 @@ function bindEvents() {
     personEditId = p.id; screen = "person"; render();
   };
 
+  var bSave = document.getElementById("backup-save");
+  if (bSave) bSave.onclick = async function () {
+    await shareText("Резервная копия «Мои таблетки» от " +
+      new Date().toLocaleDateString("ru-RU") +
+      ". Сохрани это сообщение — по нему данные восстанавливаются.\n\n" + backupMake());
+    cfgSet("backup_at", new Date().toLocaleDateString("ru-RU"));
+    render();
+  };
+  var bLoad = document.getElementById("backup-load");
+  if (bLoad) bLoad.onclick = function () {
+    var t = prompt("Вставь сюда текст резервной копии целиком");
+    if (t) backupRestore(t);
+  };
+
   // ── Настройки карточки ──
   if (screen === "person") {
     var p = profiles.find(function (x) { return x.id === personEditId; });
@@ -1060,6 +1074,19 @@ function renderPeople() {
   html += '<button class="btn-main" id="add-person">+ Добавить человека</button>';
 
   html += '<div class="card" style="display:block; margin-top:18px">' +
+    '<div style="font-weight:800; margin-bottom:6px">💾 Резервная копия</div>' +
+    '<div style="font-size:13.5px; color:var(--mute); font-weight:600; line-height:1.5">' +
+      'Данные живут только на этом телефоне. Если удалить приложение или сменить телефон — они пропадут. ' +
+      'Сделай копию и отправь её себе в мессенджер' +
+      (cfgGet("backup_at", "") ? '<br><b>Последняя копия: ' + esc(cfgGet("backup_at", "")) + '</b>' : '') +
+    '</div>' +
+    '<div class="med-actions">' +
+      '<button class="btn-small primary" id="backup-save">Сохранить копию</button>' +
+      '<button class="btn-small" id="backup-load">Восстановить</button>' +
+    '</div>' +
+  '</div>';
+
+  html += '<div class="card" style="display:block; margin-top:12px">' +
     '<div style="font-weight:800; margin-bottom:6px">Как это работает</div>' +
     '<div style="font-size:13.5px; color:var(--mute); font-weight:600; line-height:1.5">' +
       '1. Тот, за кем следят, жмёт «Поделиться расписанием» — у тебя появится такая же карточка<br>' +
@@ -1104,6 +1131,41 @@ function renderPerson() {
 
     '<button class="btn-main" id="person-save">Сохранить</button>' +
     '<button class="btn-ghost" id="person-plan">Поделиться расписанием этой карточки</button>';
+}
+
+// ─── Резервная копия ───
+// Собирает профили, лекарства и историю в один текст. Хранить можно где угодно —
+// отправить себе в мессенджер, сохранить в заметки. Восстановление — вставкой текста.
+function backupMake() {
+  var dump = { v: 2, at: new Date().toISOString(), profiles: profiles, data: {} };
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0)) dump.data[k] = localStorage.getItem(k);
+  }
+  return "МОИ-ТАБЛЕТКИ-КОПИЯ:" + b64e(JSON.stringify(dump));
+}
+
+function backupRestore(text) {
+  var marker = "МОИ-ТАБЛЕТКИ-КОПИЯ:";
+  var at = (text || "").indexOf(marker);
+  if (at < 0) { alert("Это не похоже на резервную копию"); return false; }
+  var dump;
+  try { dump = JSON.parse(b64d(text.slice(at + marker.length).trim())); }
+  catch (e) { alert("Копия повреждена — текст скопирован не целиком?"); return false; }
+  if (!dump.profiles || !dump.data) { alert("В копии нет данных"); return false; }
+  if (!confirm("Восстановить " + dump.profiles.length + " карточек? Текущие данные будут заменены.")) return false;
+
+  for (var i = localStorage.length - 1; i >= 0; i--) {
+    var k = localStorage.key(i);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0)) localStorage.removeItem(k);
+  }
+  Object.keys(dump.data).forEach(function (k) { localStorage.setItem(k, dump.data[k]); });
+  profiles = dump.profiles; saveProfiles(profiles);
+  curPid = profiles[0].id; cfgSet("last_profile", curPid);
+  meds = loadMeds(); screen = "today"; selectedKey = dateKey();
+  syncNotifications(); render();
+  alert("Данные восстановлены");
+  return true;
 }
 
 // ─── Локальные уведомления (Capacitor) ───
