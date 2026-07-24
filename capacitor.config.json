@@ -2,6 +2,10 @@
   "appId": "ru.mytabs.app",
   "appName": "Мои таблетки",
   "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
   "plugins": {
     "LocalNotifications": {
       "smallIcon": "ic_stat_icon",
