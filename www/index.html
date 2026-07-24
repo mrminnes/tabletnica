@@ -166,6 +166,7 @@
   <div id="nav">
     <button data-nav="today"><div class="icon">🕘</div>Сегодня</button>
     <button data-nav="meds"><div class="icon">💊</div>Лекарства</button>
+    <button data-nav="people"><div class="icon">👥</div>Люди</button>
   </div>
 
 <script>
@@ -190,18 +191,63 @@ function round2(x) { return Math.round(x * 100) / 100; }
 function num(v) { var x = parseFloat(String(v).replace(",", ".")); return isFinite(x) && x > 0 ? round2(x) : 1; }
 function fmtN(n) { return String(n).replace(".", ","); }
 
-// ─── Хранилище ───
-function loadMeds() { try { return JSON.parse(localStorage.getItem("meds")) || []; } catch (e) { return []; } }
-function saveMeds(m) { localStorage.setItem("meds", JSON.stringify(m)); }
-function loadTakenFor(key) { try { return JSON.parse(localStorage.getItem("taken:" + key)) || {}; } catch (e) { return {}; } }
-function saveTakenFor(key, t) { localStorage.setItem("taken:" + key, JSON.stringify(t)); }
+// ─── Настройки ───
+function cfgGet(k, d) { try { var v = localStorage.getItem("cfg:" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function cfgSet(k, v) { localStorage.setItem("cfg:" + k, JSON.stringify(v)); }
+
+// ─── Профили (карточки людей) ───
+// Всё лежит только на телефоне. Никакого сервера, никаких аккаунтов.
+// self  — мой профиль: после отметки предлагаем поделиться с близким
+// watch — профиль другого человека: сторожевое напоминание, если приём не подтверждён
+function loadProfiles() {
+  try { var p = JSON.parse(localStorage.getItem("profiles")); if (p && p.length) return p; } catch (e) {}
+  return [{ id: "self", name: "Я", self: true, remind: true, watch: false, share: true, graceMin: 60 }];
+}
+function saveProfiles(p) { localStorage.setItem("profiles", JSON.stringify(p)); }
+
+var profiles = loadProfiles();
+var curPid = cfgGet("last_profile", "");
+if (!profiles.some(function (p) { return p.id === curPid; })) curPid = profiles[0].id;
+
+function curProfile() {
+  return profiles.find(function (p) { return p.id === curPid; }) || profiles[0];
+}
+
+// ─── Хранилище (в разрезе профиля) ───
+function medsOf(pid) { try { return JSON.parse(localStorage.getItem("meds:" + pid)) || []; } catch (e) { return []; } }
+function takenOf(pid, key) { try { return JSON.parse(localStorage.getItem("taken:" + pid + ":" + key)) || {}; } catch (e) { return {}; } }
+
+function loadMeds() { return medsOf(curPid); }
+function saveMeds(m) { localStorage.setItem("meds:" + curPid, JSON.stringify(m)); }
+function loadTakenFor(key) { return takenOf(curPid, key); }
+function saveTakenFor(key, t) { localStorage.setItem("taken:" + curPid + ":" + key, JSON.stringify(t)); }
+
+// Миграция с версий без профилей: всё, что было, становится профилем «Я»
+(function migrateToProfiles() {
+  if (localStorage.getItem("meds") !== null) {
+    localStorage.setItem("meds:self", localStorage.getItem("meds"));
+    localStorage.removeItem("meds");
+  }
+  var moves = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    // старый формат: taken:2026-07-23 (ровно одна часть после префикса)
+    if (k && k.indexOf("taken:") === 0 && k.split(":").length === 2) moves.push(k);
+  }
+  moves.forEach(function (k) {
+    localStorage.setItem("taken:self:" + k.slice(6), localStorage.getItem(k));
+    localStorage.removeItem(k);
+  });
+  if (localStorage.getItem("profiles") === null) saveProfiles(profiles);
+})();
 
 // Чистим отметки старше 90 дней
 (function cleanup() {
   var limit = new Date(); limit.setDate(limit.getDate() - 90);
   for (var i = localStorage.length - 1; i >= 0; i--) {
     var k = localStorage.key(i);
-    if (k && k.indexOf("taken:") === 0 && k.slice(6) < dateKey(limit)) localStorage.removeItem(k);
+    var parts = k ? k.split(":") : [];
+    if (parts[0] === "taken" && parts.length === 3 && parts[2] < dateKey(limit)) localStorage.removeItem(k);
   }
 })();
 
@@ -211,6 +257,8 @@ var screen = "today";
 var selectedKey = dateKey();   // выбранный день в недельной ленте
 var justTaken = null;
 var highlightKey = null;       // карточка, в которую «провалились» из уведомления
+var notifInfo = { supported: false, count: 0, next: null, exact: "unknown" };
+var personEditId = null;
 
 // Миграция данных из версии 1.0 (не теряем уже введённые лекарства)
 (function migrate() {
@@ -229,6 +277,8 @@ var highlightKey = null;       // карточка, в которую «пров
     if (nm.every == null) { nm.every = 2; changed = true; }
     if (nm.remindOffsets == null) { nm.remindOffsets = [nm.remindBefore || 0]; delete nm.remindBefore; changed = true; }
     if (nm.doseNote == null) nm.doseNote = "";
+    if (nm.lineage == null) { nm.lineage = nm.id; changed = true; }
+    if (nm.until === undefined) { nm.until = null; changed = true; }
     return nm;
   });
   if (changed) saveMeds(meds);
@@ -242,11 +292,29 @@ function esc(s) {
 
 // ─── Расписание: принимается ли лекарство в конкретную дату ───
 function occursOn(m, date) {
+  if (m.until && dateKey(date) >= m.until) return false; // версия заменена новой
   var diff = diffDays(parseKey(m.start), date);
   if (diff < 0) return false;
   if (m.courseDays && diff >= m.courseDays) return false;
   if (m.mode === "interval") return diff % Math.max(1, m.every) === 0;
   return m.days.indexOf(dayIdx(date)) !== -1;
+}
+
+// ─── Версии одного лекарства ───
+// Правки «с будущей даты» создают новую версию, старая закрывается полем until.
+// Запас общий для всех версий и хранится в корневой записи (id === lineage).
+function linOf(m) { return m.lineage || m.id; }
+function famOf(lin) {
+  return meds.filter(function (x) { return linOf(x) === lin; })
+             .sort(function (a, b) { return a.start.localeCompare(b.start); });
+}
+function holderOf(m) {
+  var root = meds.find(function (x) { return x.id === linOf(m); });
+  return root || m;
+}
+function activeVersions(lin) {
+  var today = dateKey();
+  return famOf(lin).filter(function (x) { return !x.until || x.until > today; });
 }
 
 function intakesFor(date) {
@@ -313,7 +381,14 @@ function renderToday() {
       '<div class="lbl">' + DAY_NAMES[i] + '</div><div class="num">' + d.getDate() + '</div><div class="dots">' + dots + '</div></div>';
   }
 
-  var html = '<p class="date">' + esc(dateStr) + '</p>' +
+  var switcher = profiles.length > 1
+    ? '<div class="chips-wrap" style="margin-bottom:12px">' + profiles.map(function (p) {
+        return '<button class="chip' + (p.id === curPid ? " on" : "") + '" data-pid="' + esc(p.id) + '">' +
+          (p.self ? "🙂 " : "👤 ") + esc(p.name) + '</button>';
+      }).join("") + '</div>'
+    : '';
+
+  var html = switcher + '<p class="date">' + esc(dateStr) + '</p>' +
     '<h1>' + title + '</h1>' +
     '<p class="sub" style="margin-bottom:' + (isToday ? '18' : '6') + 'px">' + sub + '</p>' +
     (!isToday ? '<p style="margin:0 0 14px"><button class="link-btn" id="back-today">← вернуться к сегодня</button></p>' : '') +
@@ -355,7 +430,7 @@ function renderToday() {
         '<div class="info">' +
           '<div class="med-name">' + esc(it.med.name) + '</div>' +
           '<div class="med-dose">' + doseLine + '</div>' +
-          (isToday && it.med.stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + fmtN(it.med.stock) + ' шт — пора купить</div>' : '') +
+          (isToday && holderOf(it.med).stock <= 5 && !isTaken ? '<div class="low-badge">Осталось ' + fmtN(holderOf(it.med).stock) + ' шт — пора купить</div>' : '') +
         '</div>' +
         '<div class="right"><div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' + status + '</div>' +
       '</div>';
@@ -366,12 +441,40 @@ function renderToday() {
 // ─── Экран «Мои лекарства» ───
 function renderMeds() {
   var html = '<h1 style="margin-bottom:16px">Мои лекарства</h1>';
-  if (meds.length === 0) {
-    html += '<div class="empty"><div class="emoji">💊</div><p>Список пуст</p><p class="hint">Добавь лекарство кнопкой «+»</p></div>';
+
+  if (notifInfo.supported) {
+    var ok = notifInfo.exact === "granted";
+    html += '<div class="card" style="display:block; border-color:' + (ok ? "var(--line)" : "var(--coral)") + '">' +
+      '<div style="font-weight:800; font-size:15px; margin-bottom:4px">🔔 Напоминания</div>' +
+      '<div style="font-size:13.5px; color:var(--mute); font-weight:600">' +
+        (notifInfo.count > 0
+          ? "Запланировано: " + notifInfo.count +
+            (notifInfo.next ? "<br>Ближайшее: " + esc(notifInfo.next) : "")
+          : "Ничего не запланировано — проверь время и дни у лекарств") +
+      '</div>' +
+      (!ok ? '<div style="font-size:13px; color:var(--coral); font-weight:700; margin-top:8px">' +
+        'Точные будильники запрещены — уведомления будут опаздывать или не приходить</div>' : '') +
+      '<div class="med-actions">' +
+        (!ok ? '<button class="btn-small danger" id="fix-exact">Разрешить будильники</button>' : '') +
+        '<button class="btn-small primary" id="resync">Перепроверить</button>' +
+      '</div>' +
+    '</div>';
   }
-  meds.forEach(function (m) {
-    var low = m.stock <= 5;
+
+  var lins = [];
+  meds.forEach(function (m) { if (lins.indexOf(linOf(m)) === -1) lins.push(linOf(m)); });
+  var shown = 0;
+
+  lins.forEach(function (lin) {
+    var act = activeVersions(lin);
+    if (!act.length) return;           // лекарство закончилось — остаётся только в истории
+    shown++;
+    var m = act[0];                    // действующая версия
+    var next = act[1];                 // запланированная замена, если есть
+    var h = holderOf(m), low = h.stock <= 5;
     var timesTxt = m.times.map(function (x) { return x.t + " (" + fmtN(x.n) + " шт)"; }).join(", ");
+    var shortDate = function (k) { return parseKey(k).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }); };
+
     html +=
       '<div class="card" style="display:block">' +
         '<div style="display:flex; align-items:center; gap:10px">' +
@@ -380,38 +483,66 @@ function renderMeds() {
             '<div class="med-name">' + esc(m.name) + '</div>' +
             '<div style="font-size:13.5px; color:var(--mute); font-weight:600">' +
               timesTxt + ' · ' + schedText(m) +
-              (m.start > dateKey() ? ' · с ' + parseKey(m.start).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : '') +
+              (m.start > dateKey() ? ' · с ' + shortDate(m.start) : '') +
               ' · ' + remindText(m) +
               (m.doseNote ? ' · ' + esc(m.doseNote) : '') +
               (m.courseDays ? ' · курс ' + m.courseDays + ' дн.' : ' · постоянно') +
             '</div>' +
           '</div>' +
         '</div>' +
+
+        (next ? '<div style="margin-top:10px; background:var(--green-soft); border-radius:14px; padding:10px 12px">' +
+          '<div style="font-size:13px; font-weight:800; color:var(--green)">С ' + shortDate(next.start) + ' — запланировано изменение</div>' +
+          '<div style="font-size:13px; color:var(--mute); font-weight:600; margin-top:2px">' +
+            esc(next.name) + ' · ' + next.times.map(function (x) { return x.t + " (" + fmtN(x.n) + ")"; }).join(", ") + ' · ' + schedText(next) +
+          '</div>' +
+          '<button class="link-btn" data-cancelnext="' + lin + '" style="margin-top:6px">Отменить изменение</button>' +
+        '</div>' : '') +
+
         '<div style="margin-top:12px">' +
           '<div class="stock-row"><span style="color:var(--mute)">Запас</span>' +
-            '<span style="color:' + (low ? "var(--coral)" : "var(--green)") + '">' + fmtN(m.stock) + ' из ' + m.pack + ' шт</span></div>' +
-          '<div class="stock-bar' + (low ? " low" : "") + '"><div style="width:' + Math.min(100, (m.stock / m.pack) * 100) + '%"></div></div>' +
+            '<span style="color:' + (low ? "var(--coral)" : "var(--green)") + '">' + fmtN(h.stock) + ' из ' + h.pack + ' шт</span></div>' +
+          '<div class="stock-bar' + (low ? " low" : "") + '"><div style="width:' + Math.min(100, (h.stock / h.pack) * 100) + '%"></div></div>' +
         '</div>' +
         '<div class="med-actions">' +
-          '<button class="btn-small primary" data-refill="' + m.id + '">Купил упаковку +' + m.pack + '</button>' +
-          '<button class="btn-small danger" data-del="' + m.id + '">Удалить</button>' +
+          '<button class="btn-small primary" data-edit="' + m.id + '">Изменить</button>' +
+          '<button class="btn-small primary" data-refill="' + h.id + '">Купил +' + h.pack + '</button>' +
+          '<button class="btn-small danger" data-del="' + lin + '">Удалить</button>' +
         '</div>' +
       '</div>';
   });
+
+  if (shown === 0) {
+    html += '<div class="empty"><div class="emoji">💊</div><p>Список пуст</p><p class="hint">Добавь лекарство кнопкой «+»</p></div>';
+  }
   return html;
 }
 
 // ─── Экран «Добавить» ───
 var form = null;
 function blankForm() {
-  return { name: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
+  return { editId: null, name: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
            days: [0,1,2,3,4,5,6], every: 2, start: dateKey(), remindOffsets: [0],
-           pack: 30, forever: true, courseN: 14 };
+           pack: 30, forever: true, courseN: 14, applyMode: "now", applyFrom: dateKey(new Date(Date.now() + 86400000)) };
+}
+function formFromMed(m) {
+  var h = holderOf(m);
+  return {
+    editId: m.id, name: m.name, doseNote: m.doseNote || "",
+    times: m.times.map(function (x) { return { t: x.t, n: x.n }; }),
+    mode: m.mode, days: m.days.slice(), every: m.every, start: m.start,
+    remindOffsets: (m.remindOffsets || []).slice(), pack: h.pack,
+    forever: !m.courseDays, courseN: m.courseDays || 14,
+    applyMode: "now", applyFrom: dateKey(new Date(Date.now() + 86400000)),
+  };
 }
 function renderAdd() {
   var f = form;
-  var html = '<h1 style="font-size:24px">Новое лекарство</h1>' +
-    '<p class="sub" style="margin-bottom:0">Пара шагов — и напоминания готовы</p>' +
+  var editing = !!f.editId;
+  var editingFuture = editing && f.start > dateKey(); // ещё не начатое лекарство правим целиком
+
+  var html = '<h1 style="font-size:24px">' + (editing ? "Изменить лекарство" : "Новое лекарство") + '</h1>' +
+    '<p class="sub" style="margin-bottom:0">' + (editing ? "Меняй что нужно и сохрани" : "Пара шагов — и напоминания готовы") + '</p>' +
     '<label>Название</label>' +
     '<input class="inp" id="f-name" value="' + esc(f.name) + '" placeholder="Например, Витамин C">' +
 
@@ -441,11 +572,13 @@ function renderAdd() {
       '<p class="hint-line">1 — каждый день, 2 — через день, 3 — каждые 3 дня… Отсчёт с сегодняшнего дня.</p>';
   }
 
-  html += '<label>Дата начала</label>' +
-    '<input type="date" class="inp" id="f-start" value="' + esc(f.start) + '">' +
-    '<p class="hint-line">' + (f.mode === "interval"
-      ? "Для схемы «через день» задаёт точку отсчёта — поставь завтрашнюю дату, если начинаешь с завтра."
-      : "До этой даты приёмов и напоминаний не будет.") + '</p>' +
+  html += (!editing || editingFuture
+    ? '<label>Дата начала</label>' +
+      '<input type="date" class="inp" id="f-start" value="' + esc(f.start) + '">' +
+      '<p class="hint-line">' + (f.mode === "interval"
+        ? "Для схемы «через день» задаёт точку отсчёта — поставь завтрашнюю дату, если начинаешь с завтра."
+        : "До этой даты приёмов и напоминаний не будет.") + '</p>'
+    : '') +
 
     '<label>Напоминания</label>' +
     '<div class="chips-wrap">' + REMIND_OPTS.map(function (o) {
@@ -466,7 +599,19 @@ function renderAdd() {
     '<label>Сколько штук в упаковке</label>' +
     '<input type="number" min="1" class="inp" id="f-pack" value="' + f.pack + '">' +
 
-    '<button class="btn-main" id="f-save"' + (formValid() ? '' : ' disabled') + '>Сохранить</button>' +
+    (editing && !editingFuture
+      ? '<label>Когда применить изменения</label>' +
+        '<div class="chips2">' +
+          '<button class="chip' + (f.applyMode === "now" ? " on" : "") + '" id="f-now">Сразу</button>' +
+          '<button class="chip' + (f.applyMode === "from" ? " on" : "") + '" id="f-from">С даты</button>' +
+        '</div>' +
+        (f.applyMode === "from"
+          ? '<input type="date" class="inp" id="f-applyfrom" min="' + dateKey(new Date(Date.now() + 86400000)) + '" value="' + esc(f.applyFrom) + '" style="margin-top:8px">' +
+            '<p class="hint-line">До этой даты всё останется по-старому, история приёмов сохранится.</p>'
+          : '<p class="hint-line">Правки применятся ко всем дням, включая прошедшие. Подходит для опечаток; если меняешь расписание — выбери «С даты».</p>')
+      : '') +
+
+    '<button class="btn-main" id="f-save"' + (formValid() ? '' : ' disabled') + '>' + (editing ? "Сохранить изменения" : "Сохранить") + '</button>' +
     '<button class="btn-ghost" id="f-cancel">Отмена</button>';
   return html;
 }
@@ -482,6 +627,8 @@ var nav = document.getElementById("nav");
 function render() {
   if (screen === "today") el.innerHTML = renderToday();
   else if (screen === "meds") el.innerHTML = renderMeds();
+  else if (screen === "people") el.innerHTML = renderPeople();
+  else if (screen === "person") el.innerHTML = renderPerson();
   else if (screen === "add") el.innerHTML = renderAdd();
 
   fab.style.display = screen === "add" ? "none" : "block";
@@ -500,6 +647,7 @@ function readForm() {
   document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = num(inp.value); });
   if (g("f-every")) form.every = Math.max(1, +g("f-every").value || 1);
   if (g("f-start")) form.start = g("f-start").value || dateKey();
+  if (g("f-applyfrom")) form.applyFrom = g("f-applyfrom").value || form.applyFrom;
   if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
   if (g("f-coursen")) form.courseN = Math.max(1, +g("f-coursen").value || 14);
 }
@@ -521,42 +669,150 @@ function bindEvents() {
       var med = meds.find(function (m) { return m.id === medId; });
       var tm = med ? med.times.find(function (x) { return med.id + "@" + x.t === key; }) : null;
       var n = tm ? tm.n : 1;
+      var stockId = med ? holderOf(med).id : medId;
 
       if (taken[key]) {
         if (!confirm("Отменить отметку о приёме?")) return;
         delete taken[key];
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: round2(m.stock + n) }) : m; });
+        meds = meds.map(function (m) { return m.id === stockId ? Object.assign({}, m, { stock: round2(m.stock + n) }) : m; });
         justTaken = null;
       } else {
         var retro = selectedKey < dateKey();
-        taken[key] = retro ? { at: hhmm(new Date()), retro: true } : { at: hhmm(new Date()) };
-        meds = meds.map(function (m) { return m.id === medId ? Object.assign({}, m, { stock: Math.max(0, round2(m.stock - n)) }) : m; });
+        var atTime = hhmm(new Date());
+        taken[key] = retro ? { at: atTime, retro: true } : { at: atTime };
+        meds = meds.map(function (m) { return m.id === stockId ? Object.assign({}, m, { stock: Math.max(0, round2(m.stock - n)) }) : m; });
         justTaken = key;
         if (highlightKey === key) highlightKey = null;
         setTimeout(function () { justTaken = null; }, 700);
         if (navigator.vibrate) navigator.vibrate(30);
+        var prof = curProfile();
+        if (prof.share && med) {
+          var intake = { key: key, time: tm ? tm.t : "", n: n, med: med };
+          setTimeout(function () { shareText(takenMessage(prof, intake, atTime, selectedKey)); }, 250);
+        }
       }
       saveTakenFor(selectedKey, taken); saveMeds(meds); syncNotifications(); render();
     };
   });
 
-  // Пополнить / удалить
+  // Изменить / пополнить / удалить / отменить запланированное изменение
+  el.querySelectorAll("[data-edit]").forEach(function (btn) {
+    btn.onclick = function () {
+      var m = meds.find(function (x) { return x.id === +btn.dataset.edit; });
+      if (!m) return;
+      form = formFromMed(m); screen = "add"; render();
+    };
+  });
   el.querySelectorAll("[data-refill]").forEach(function (btn) {
     btn.onclick = function () {
       var id = +btn.dataset.refill;
-      meds = meds.map(function (m) { return m.id === id ? Object.assign({}, m, { stock: m.stock + m.pack }) : m; });
+      meds = meds.map(function (m) { return m.id === id ? Object.assign({}, m, { stock: round2(m.stock + m.pack) }) : m; });
       saveMeds(meds); render();
     };
   });
   el.querySelectorAll("[data-del]").forEach(function (btn) {
     btn.onclick = function () {
-      var id = +btn.dataset.del;
-      var m = meds.find(function (x) { return x.id === id; });
-      if (!confirm("Удалить «" + (m ? m.name : "") + "»?")) return;
-      meds = meds.filter(function (x) { return x.id !== id; });
+      var lin = +btn.dataset.del;
+      var m = famOf(lin)[0];
+      if (!confirm("Удалить «" + (m ? m.name : "") + "»? История приёмов тоже пропадёт.")) return;
+      meds = meds.filter(function (x) { return linOf(x) !== lin; });
       saveMeds(meds); syncNotifications(); render();
     };
   });
+  el.querySelectorAll("[data-cancelnext]").forEach(function (btn) {
+    btn.onclick = function () {
+      var lin = +btn.dataset.cancelnext;
+      var act = activeVersions(lin);
+      if (act.length < 2) return;
+      var keepId = act[0].id, dropIds = act.slice(1).map(function (x) { return x.id; });
+      meds = meds.filter(function (x) { return dropIds.indexOf(x.id) === -1; })
+                 .map(function (x) { return x.id === keepId ? Object.assign({}, x, { until: null }) : x; });
+      saveMeds(meds); syncNotifications(); render();
+    };
+  });
+
+  var fixBtn = document.getElementById("fix-exact");
+  if (fixBtn) fixBtn.onclick = async function () {
+    var LN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if (LN && LN.changeExactNotificationSetting) { try { await LN.changeExactNotificationSetting(); } catch (e) {} }
+  };
+  var resyncBtn = document.getElementById("resync");
+  if (resyncBtn) resyncBtn.onclick = function () { syncNotifications(); };
+
+  // Переключение профиля в шапке
+  el.querySelectorAll("[data-pid]").forEach(function (btn) {
+    btn.onclick = function () {
+      curPid = btn.dataset.pid; cfgSet("last_profile", curPid);
+      meds = loadMeds(); selectedKey = dateKey(); render();
+    };
+  });
+
+  // ── Экран «Люди» ──
+  el.querySelectorAll("[data-openp]").forEach(function (btn) {
+    btn.onclick = function () {
+      curPid = btn.dataset.openp; cfgSet("last_profile", curPid);
+      meds = loadMeds(); screen = "today"; selectedKey = dateKey(); render();
+    };
+  });
+  el.querySelectorAll("[data-editp]").forEach(function (btn) {
+    btn.onclick = function () { personEditId = btn.dataset.editp; screen = "person"; render(); };
+  });
+  el.querySelectorAll("[data-delp]").forEach(function (btn) {
+    btn.onclick = function () {
+      var p = profiles.find(function (x) { return x.id === btn.dataset.delp; });
+      if (!p || !confirm("Удалить карточку «" + p.name + "» со всеми лекарствами и историей?")) return;
+      localStorage.removeItem("meds:" + p.id);
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf("taken:" + p.id + ":") === 0) localStorage.removeItem(k);
+      }
+      profiles = profiles.filter(function (x) { return x.id !== p.id; });
+      saveProfiles(profiles);
+      if (curPid === p.id) { curPid = profiles[0].id; cfgSet("last_profile", curPid); meds = loadMeds(); }
+      syncNotifications(); render();
+    };
+  });
+  var addP = document.getElementById("add-person");
+  if (addP) addP.onclick = function () {
+    var name = (prompt("Имя человека (как он назовёт себя у себя в приложении)") || "").trim();
+    if (!name) return;
+    if (profiles.some(function (x) { return x.name.toLowerCase() === name.toLowerCase(); }))
+      return alert("Карточка с таким именем уже есть");
+    var p = { id: "p" + Date.now(), name: name.slice(0, 32), self: false,
+              remind: false, watch: true, share: false, graceMin: 60 };
+    profiles.push(p); saveProfiles(profiles);
+    personEditId = p.id; screen = "person"; render();
+  };
+
+  // ── Настройки карточки ──
+  if (screen === "person") {
+    var p = profiles.find(function (x) { return x.id === personEditId; });
+    var back = document.getElementById("person-back");
+    if (back) back.onclick = function () { screen = "people"; render(); };
+    el.querySelectorAll("[data-toggle]").forEach(function (btn) {
+      btn.onclick = function () {
+        var f = btn.dataset.toggle;
+        p.name = (document.getElementById("person-name").value || p.name).trim().slice(0, 32) || p.name;
+        p[f] = !p[f];
+        saveProfiles(profiles); render();
+      };
+    });
+    var save = document.getElementById("person-save");
+    if (save) save.onclick = function () {
+      var nm = (document.getElementById("person-name").value || "").trim().slice(0, 32);
+      if (nm) p.name = nm;
+      var gr = document.getElementById("person-grace");
+      if (gr) p.graceMin = Math.min(720, Math.max(5, +gr.value || 60));
+      saveProfiles(profiles); syncNotifications(); screen = "people"; render();
+    };
+    var plan = document.getElementById("person-plan");
+    if (plan) plan.onclick = function () {
+      var list = medsOf(p.id);
+      if (!list.length) return alert("В этой карточке пока нет лекарств");
+      shareText("Моё расписание приёма лекарств.\nОткрой ссылку — карточка «" + p.name +
+                "» создастся автоматически:\n\n" + planLink(p, list));
+    };
+  }
 
   // Форма добавления
   if (screen === "add") {
@@ -568,6 +824,9 @@ function bindEvents() {
     g("f-pack").onchange = readForm;
     if (g("f-every")) g("f-every").onchange = readForm;
     if (g("f-start")) g("f-start").onchange = readForm;
+    if (g("f-applyfrom")) g("f-applyfrom").onchange = readForm;
+    if (g("f-now")) g("f-now").onclick = function () { readForm(); form.applyMode = "now"; render(); };
+    if (g("f-from")) g("f-from").onclick = function () { readForm(); form.applyMode = "from"; render(); };
     document.querySelectorAll("[data-remind]").forEach(function (btn) {
       btn.onclick = function () {
         readForm();
@@ -598,19 +857,52 @@ function bindEvents() {
     g("f-save").onclick = function () {
       readForm();
       if (!formValid()) return;
-      meds.push({
-        id: Date.now(), name: form.name.trim(), doseNote: form.doseNote.trim(),
+      var fields = {
+        name: form.name.trim(), doseNote: form.doseNote.trim(),
         times: form.times.map(function (x) { return { t: x.t, n: x.n }; }),
         mode: form.mode, days: form.days.slice(), every: form.every,
-        start: form.start || dateKey(), remindOffsets: form.remindOffsets.slice(),
-        stock: form.pack, pack: form.pack,
+        remindOffsets: form.remindOffsets.slice(),
         courseDays: form.forever ? null : form.courseN,
-        color: PILL_COLORS[Math.floor(Math.random() * PILL_COLORS.length)],
-      });
+      };
+
+      if (!form.editId) {
+        // Новое лекарство
+        var newId = Date.now();
+        meds.push(Object.assign({ id: newId, lineage: newId, until: null,
+          start: form.start || dateKey(), stock: form.pack, pack: form.pack,
+          color: PILL_COLORS[Math.floor(Math.random() * PILL_COLORS.length)] }, fields));
+      } else {
+        var old = meds.find(function (x) { return x.id === form.editId; });
+        var holder = holderOf(old);
+        // Упаковка/запас общие для всех версий — обновляем сразу
+        if (form.pack !== holder.pack) {
+          meds = meds.map(function (x) { return x.id === holder.id ? Object.assign({}, x, { pack: form.pack }) : x; });
+        }
+        var editingFuture = old.start > dateKey();
+
+        if (form.applyMode === "from" && !editingFuture) {
+          // Новая версия с выбранной даты, старая закрывается этим днём
+          var from = form.applyFrom;
+          var lin = linOf(old);
+          // убираем ранее запланированные версии этой линейки, начинающиеся не раньше from
+          meds = meds.filter(function (x) { return !(linOf(x) === lin && x.id !== old.id && x.start >= from); });
+          meds = meds.map(function (x) { return x.id === old.id ? Object.assign({}, x, { until: from }) : x; });
+          meds.push(Object.assign({ id: Date.now(), lineage: lin, until: null, start: from,
+            stock: 0, pack: form.pack, color: old.color }, fields));
+        } else {
+          // Правка на месте
+          meds = meds.map(function (x) {
+            return x.id === old.id
+              ? Object.assign({}, x, fields, editingFuture ? { start: form.start || x.start } : {})
+              : x;
+          });
+        }
+      }
       saveMeds(meds); syncNotifications();
-      screen = "today"; selectedKey = dateKey(); render();
+      screen = form.editId ? "meds" : "today";
+      selectedKey = dateKey(); render();
     };
-    g("f-cancel").onclick = function () { screen = "today"; render(); };
+    g("f-cancel").onclick = function () { screen = form.editId ? "meds" : "today"; render(); };
   }
 }
 
@@ -625,6 +917,194 @@ nav.querySelectorAll("button").forEach(function (b) {
 
 // Обновляем статусы «пора!» раз в 30 секунд
 setInterval(function () { if (screen === "today") render(); }, 30000);
+
+// ─── Обмен без сервера: системное «Поделиться» и ссылки ───
+// Ничего никуда не отправляется само. Сообщение отправляет сам человек,
+// своим мессенджером, тому, кому считает нужным.
+
+function b64e(s) {
+  var bytes = new TextEncoder().encode(s), bin = "";
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64d(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  var bin = atob(s), bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+async function shareText(text) {
+  var Sh = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share;
+  try {
+    if (Sh) { await Sh.share({ text: text, dialogTitle: "Отправить близкому" }); return true; }
+    if (navigator.share) { await navigator.share({ text: text }); return true; }
+  } catch (e) { return false; }        // пользователь закрыл окно выбора — это не ошибка
+  try { await navigator.clipboard.writeText(text); alert("Скопировано — вставь в мессенджер"); return true; }
+  catch (e) { alert(text); return true; }
+}
+
+// Сообщение об отметке приёма
+function takenMessage(prof, it, atTime, dateK) {
+  var link = "medapp://taken?p=" + encodeURIComponent(prof.name) +
+             "&d=" + dateK + "&k=" + encodeURIComponent(it.key) +
+             "&t=" + it.time + "&at=" + atTime;
+  var who = prof.self ? "Я" : prof.name;
+  return who + ": принято в " + atTime + " — " + it.med.name + ", " + fmtN(it.n) + " шт" +
+         " (по плану " + it.time + ")\n\nОтметить у себя: " + link;
+}
+
+// Ссылка с расписанием — чтобы у близкого карточка совпала один в один
+function planLink(prof, medsList) {
+  var payload = { n: prof.name, m: medsList.map(function (m) {
+    return { id: m.id, lineage: m.lineage, name: m.name, doseNote: m.doseNote,
+             times: m.times, mode: m.mode, days: m.days, every: m.every,
+             start: m.start, until: m.until, courseDays: m.courseDays,
+             remindOffsets: m.remindOffsets, pack: m.pack, stock: m.stock, color: m.color };
+  }) };
+  return "medapp://plan?d=" + b64e(JSON.stringify(payload));
+}
+
+// ─── Приём входящих ссылок ───
+function applyTakenLink(params) {
+  var pname = params.get("p") || "", dateK = params.get("d") || dateKey();
+  var key = params.get("k") || "", time = params.get("t") || "", at = params.get("at") || "";
+  var prof = profiles.find(function (p) { return p.name.toLowerCase() === pname.toLowerCase(); });
+  if (!prof) {
+    alert("Нет карточки «" + pname + "». Создай её на вкладке «Люди» — и ссылки начнут отмечаться сами.");
+    screen = "people"; render(); return;
+  }
+  var taken = takenOf(prof.id, dateK);
+  var list = medsOf(prof.id);
+  // точное совпадение по ключу приёма, иначе — по плановому времени
+  var hit = key;
+  if (!list.some(function (m) { return m.times.some(function (x) { return m.id + "@" + x.t === key; }); })) {
+    var byTime = null;
+    list.forEach(function (m) {
+      m.times.forEach(function (x) { if (x.t === time && !byTime) byTime = m.id + "@" + x.t; });
+    });
+    hit = byTime || key;
+  }
+  taken[hit] = { at: at || hhmm(new Date()), via: "link" };
+  localStorage.setItem("taken:" + prof.id + ":" + dateK, JSON.stringify(taken));
+  curPid = prof.id; cfgSet("last_profile", curPid);
+  meds = loadMeds(); screen = "today"; selectedKey = dateK;
+  syncNotifications(); render();
+  if (navigator.vibrate) navigator.vibrate(30);
+}
+
+function applyPlanLink(params) {
+  var raw = params.get("d");
+  if (!raw) return;
+  var data;
+  try { data = JSON.parse(b64d(raw)); } catch (e) { return alert("Не удалось прочитать ссылку с расписанием"); }
+  var name = (data.n || "Близкий").slice(0, 32);
+  var prof = profiles.find(function (p) { return p.name.toLowerCase() === name.toLowerCase(); });
+  if (prof) {
+    if (!confirm("Обновить расписание в карточке «" + prof.name + "»?")) return;
+  } else {
+    if (!confirm("Создать карточку «" + name + "» с её расписанием?")) return;
+    prof = { id: "p" + Date.now(), name: name, self: false,
+             remind: false, watch: true, share: false, graceMin: 60 };
+    profiles.push(prof); saveProfiles(profiles);
+  }
+  localStorage.setItem("meds:" + prof.id, JSON.stringify(data.m || []));
+  curPid = prof.id; cfgSet("last_profile", curPid);
+  meds = loadMeds(); screen = "today"; selectedKey = dateKey();
+  syncNotifications(); render();
+}
+
+function handleUrl(url) {
+  if (!url) return;
+  var q = url.indexOf("?");
+  var params = new URLSearchParams(q >= 0 ? url.slice(q + 1) : "");
+  if (url.indexOf("taken") >= 0) applyTakenLink(params);
+  else if (url.indexOf("plan") >= 0) applyPlanLink(params);
+}
+
+(function initDeepLinks() {
+  var App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (App) {
+    App.addListener("appUrlOpen", function (ev) { handleUrl(ev && ev.url); });
+    if (App.getLaunchUrl) App.getLaunchUrl().then(function (r) { if (r && r.url) handleUrl(r.url); }).catch(function () {});
+  }
+  if (location.search.indexOf("taken") >= 0 || location.search.indexOf("plan") >= 0) handleUrl(location.href);
+})();
+
+// ─── Экран «Люди» ───
+function renderPeople() {
+  var html = '<h1>Люди</h1>' +
+    '<p class="sub">Карточки тех, за чьим приёмом следишь. Всё хранится только на этом телефоне</p>';
+
+  profiles.forEach(function (p) {
+    var cnt = medsOf(p.id).length;
+    html += '<div class="card" style="display:block' + (p.id === curPid ? '; border-color:var(--green)' : '') + '">' +
+      '<div style="display:flex; align-items:center; gap:10px">' +
+        '<div style="font-size:24px">' + (p.self ? "🙂" : "👤") + '</div>' +
+        '<div style="flex:1">' +
+          '<div class="med-name">' + esc(p.name) + (p.self ? ' · это я' : '') + '</div>' +
+          '<div class="med-dose">' + cnt + ' лек. · ' +
+            (p.remind ? "напоминает мне" : "без напоминаний") +
+            (p.watch ? " · следит за подтверждением" : "") +
+            (p.share ? " · предлагает поделиться" : "") + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="med-actions">' +
+        '<button class="btn-small primary" data-openp="' + esc(p.id) + '">Открыть</button>' +
+        '<button class="btn-small primary" data-editp="' + esc(p.id) + '">Настроить</button>' +
+        (profiles.length > 1 ? '<button class="btn-small danger" data-delp="' + esc(p.id) + '">Удалить</button>' : '') +
+      '</div>' +
+    '</div>';
+  });
+
+  html += '<button class="btn-main" id="add-person">+ Добавить человека</button>';
+
+  html += '<div class="card" style="display:block; margin-top:18px">' +
+    '<div style="font-weight:800; margin-bottom:6px">Как это работает</div>' +
+    '<div style="font-size:13.5px; color:var(--mute); font-weight:600; line-height:1.5">' +
+      '1. Тот, за кем следят, жмёт «Поделиться расписанием» — у тебя появится такая же карточка<br>' +
+      '2. Он отмечает приём и отправляет сообщение любым мессенджером<br>' +
+      '3. Ты нажимаешь на ссылку в сообщении — отметка встаёт автоматически<br>' +
+      '4. Если к сроку отметки нет, телефон сам напомнит: «не подтвердил приём»' +
+    '</div>' +
+  '</div>';
+  return html;
+}
+
+// Настройки одного профиля
+function renderPerson() {
+  var p = profiles.find(function (x) { return x.id === personEditId; });
+  if (!p) { screen = "people"; return renderPeople(); }
+  var sw = function (on, id, title, note) {
+    return '<div class="card" style="display:block">' +
+      '<div style="display:flex; align-items:center; gap:10px">' +
+        '<div style="flex:1"><div style="font-weight:800; font-size:15px">' + title + '</div>' +
+        '<div style="font-size:13px; color:var(--mute); font-weight:600; margin-top:2px">' + note + '</div></div>' +
+        '<button class="btn-small' + (on ? " primary" : "") + '" data-toggle="' + id + '" style="flex:0 0 80px">' +
+          (on ? "Вкл" : "Выкл") + '</button>' +
+      '</div></div>';
+  };
+
+  return '<button class="link-btn" id="person-back">← к списку</button>' +
+    '<h1 style="margin-top:10px">Настройки карточки</h1>' +
+    '<label>Имя</label>' +
+    '<input class="inp" id="person-name" value="' + esc(p.name) + '" maxlength="32">' +
+    '<p class="hint-line">Имя должно совпадать у обоих — по нему ссылки находят нужную карточку</p>' +
+
+    '<label>Что делает эта карточка</label>' +
+    sw(p.remind, "remind", "Напоминать мне о приёмах", "Нужно для себя и для тех, кому даёшь лекарство лично") +
+    sw(p.watch, "watch", "Следить за подтверждением", "Напомнит, если человек не отметил приём вовремя") +
+    sw(p.share, "share", "Предлагать поделиться", "После отметки предложит отправить сообщение близкому") +
+
+    (p.watch
+      ? '<label>Ждать подтверждения, минут</label>' +
+        '<input type="number" min="5" max="720" class="inp" id="person-grace" value="' + p.graceMin + '">' +
+        '<p class="hint-line">Через столько минут после планового времени придёт предупреждение</p>'
+      : '') +
+
+    '<button class="btn-main" id="person-save">Сохранить</button>' +
+    '<button class="btn-ghost" id="person-plan">Поделиться расписанием этой карточки</button>';
+}
 
 // ─── Локальные уведомления (Capacitor) ───
 // Планируем конкретные напоминания на 14 дней вперёд (это покрывает и интервальные
@@ -643,31 +1123,67 @@ async function syncNotifications() {
     for (var off = 0; off < 14; off++) {
       var d = new Date(); d.setDate(d.getDate() + off);
       var dk = dateKey(d);
-      var dayTaken = loadTakenFor(dk);
-      meds.forEach(function (m) {
-        if (!occursOn(m, d)) return;
-        m.times.forEach(function (tm) {
-          if (dayTaken[m.id + "@" + tm.t]) return; // уже отмечено «выпил» — не напоминаем
-          var parts = tm.t.split(":");
-          var base = new Date(d.getFullYear(), d.getMonth(), d.getDate(), +parts[0], +parts[1], 0);
-          (m.remindOffsets || []).forEach(function (mins) {
-            var when = new Date(base.getTime() - mins * 60000);
-            if (when <= now) return;
-            notifs.push({
-              id: id++,
-              title: mins > 0 ? "Скоро приём лекарства ⏰" : "Пора принять лекарство 💊",
-              body: m.name + " — " + fmtN(tm.n) + " шт" +
-                (mins > 0 ? ", приём в " + tm.t : "") +
-                (m.doseNote ? " (" + m.doseNote + ")" : ""),
-              extra: { date: dk, key: m.id + "@" + tm.t },
-              schedule: { at: when, allowWhileIdle: true },
-            });
+      profiles.forEach(function (prof) {
+        if (!prof.remind && !prof.watch) return;
+        var dayTaken = takenOf(prof.id, dk);
+        var who = prof.self ? "" : prof.name + ": ";
+        medsOf(prof.id).forEach(function (m) {
+          if (!occursOn(m, d)) return;
+          m.times.forEach(function (tm) {
+            if (dayTaken[m.id + "@" + tm.t]) return;   // уже отмечено — не напоминаем
+            var parts = tm.t.split(":");
+            var base = new Date(d.getFullYear(), d.getMonth(), d.getDate(), +parts[0], +parts[1], 0);
+
+            if (prof.remind) {
+              (m.remindOffsets || []).forEach(function (mins) {
+                var when = new Date(base.getTime() - mins * 60000);
+                if (when <= now) return;
+                notifs.push({
+                  id: id++,
+                  title: mins > 0 ? "Скоро приём лекарства ⏰" : "Пора принять лекарство 💊",
+                  body: who + m.name + " — " + fmtN(tm.n) + " шт" +
+                    (mins > 0 ? ", приём в " + tm.t : "") +
+                    (m.doseNote ? " (" + m.doseNote + ")" : ""),
+                  extra: { pid: prof.id, date: dk, key: m.id + "@" + tm.t },
+                  schedule: { at: when, allowWhileIdle: true },
+                });
+              });
+            }
+
+            if (prof.watch) {
+              // Сторожевое: если к сроку подтверждения нет — предупредить
+              var alarm = new Date(base.getTime() + (prof.graceMin || 60) * 60000);
+              if (alarm > now) notifs.push({
+                id: id++,
+                title: "Приём не подтверждён ⚠️",
+                body: prof.name + " не отметил(а) приём в " + tm.t + " — " + m.name,
+                extra: { pid: prof.id, date: dk, key: m.id + "@" + tm.t },
+                schedule: { at: alarm, allowWhileIdle: true },
+              });
+            }
           });
         });
       });
     }
     notifs = notifs.slice(0, 450); // запас до системного лимита будильников Android
     if (notifs.length) await LN.schedule({ notifications: notifs });
+
+    // Диагностика для экрана «Лекарства»
+    notifInfo.supported = true;
+    notifInfo.count = notifs.length;
+    if (notifs.length) {
+      var soonest = notifs.reduce(function (a, b) { return a.schedule.at < b.schedule.at ? a : b; });
+      var w = soonest.schedule.at;
+      var dayWord = dateKey(w) === dateKey() ? "сегодня"
+        : dateKey(w) === dateKey(new Date(Date.now() + 86400000)) ? "завтра"
+        : w.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+      notifInfo.next = dayWord + " в " + hhmm(w);
+    } else notifInfo.next = null;
+    if (LN.checkExactNotificationSetting) {
+      try { notifInfo.exact = (await LN.checkExactNotificationSetting()).exact_alarm; }
+      catch (e) { notifInfo.exact = "granted"; }
+    } else notifInfo.exact = "granted";
+    if (screen === "meds") render();
   } catch (e) { console.warn("notifications:", e); }
 }
 
@@ -678,6 +1194,9 @@ async function syncNotifications() {
   LN.addListener("localNotificationActionPerformed", function (ev) {
     var x = ev && ev.notification && ev.notification.extra;
     if (!x || !x.key) return;
+    if (x.pid && profiles.some(function (p) { return p.id === x.pid; })) {
+      curPid = x.pid; cfgSet("last_profile", curPid); meds = loadMeds();
+    }
     screen = "today";
     selectedKey = x.date || dateKey();
     highlightKey = x.key;
@@ -686,6 +1205,15 @@ async function syncNotifications() {
     if (hl) hl.scrollIntoView({ block: "center", behavior: "smooth" });
   });
 })();
+
+// При возврате в приложение — обновляем экран и перепланируем напоминания
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "visible") {
+    if (screen === "today") { selectedKey = dateKey(); render(); }
+    syncNotifications();
+
+  }
+});
 
 render();
 syncNotifications();
