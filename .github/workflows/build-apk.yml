@@ -3,11 +3,11 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # позволяет запускать сборку вручную кнопкой во вкладке Actions
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # на серверах GitHub уже установлен Android SDK
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +31,28 @@ jobs:
 
       - name: Sync web assets
         run: npx cap sync android
+
+      - name: Allow exact alarms + deep links (medapp://)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n</manifest>|' $M
+          python3 - << 'EOF'
+          import re
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          filt = (
+              '            <intent-filter>\n'
+              '                <action android:name="android.intent.action.VIEW" />\n'
+              '                <category android:name="android.intent.category.DEFAULT" />\n'
+              '                <category android:name="android.intent.category.BROWSABLE" />\n'
+              '                <data android:scheme="medapp" />\n'
+              '            </intent-filter>\n'
+          )
+          s = s.replace('</activity>', filt + '        </activity>', 1)
+          open(p, 'w', encoding='utf-8').write(s)
+          EOF
+          grep -c "medapp" $M
+          grep -c "USE_EXACT_ALARM" $M
 
       - name: Build debug APK
         run: |
