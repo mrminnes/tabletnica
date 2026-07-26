@@ -822,10 +822,21 @@ function bindEvents() {
     cfgSet("backup_at", new Date().toLocaleDateString("ru-RU"));
     render();
   };
-  var bLoad = document.getElementById("backup-load");
-  if (bLoad) bLoad.onclick = function () {
-    var t = prompt("Вставь сюда текст резервной копии целиком");
-    if (t) backupRestore(t);
+  var bToggle = document.getElementById("backup-toggle");
+  if (bToggle) bToggle.onclick = function () {
+    var box = document.getElementById("restore-box");
+    box.style.display = box.style.display === "none" ? "block" : "none";
+    if (box.style.display === "block") document.getElementById("restore-text").focus();
+  };
+  var rGo = document.getElementById("restore-go");
+  if (rGo) rGo.onclick = function () {
+    var t = document.getElementById("restore-text").value;
+    if (t && t.trim()) backupRestore(t);
+    else alert("Поле пустое — вставь текст копии");
+  };
+  var rCancel = document.getElementById("restore-cancel");
+  if (rCancel) rCancel.onclick = function () {
+    document.getElementById("restore-box").style.display = "none";
   };
 
   // ── Настройки карточки ──
@@ -1145,7 +1156,14 @@ function renderPeople() {
     '</div>' +
     '<div class="med-actions">' +
       '<button class="btn-small primary" id="backup-save">Сохранить копию</button>' +
-      '<button class="btn-small" id="backup-load">Восстановить</button>' +
+      '<button class="btn-small" id="backup-toggle">Восстановить</button>' +
+    '</div>' +
+    '<div id="restore-box" style="display:none; margin-top:10px">' +
+      '<textarea id="restore-text" class="inp" rows="4" placeholder="Вставь сюда текст резервной копии целиком" style="resize:none; height:auto; min-height:96px"></textarea>' +
+      '<div class="med-actions">' +
+        '<button class="btn-small primary" id="restore-go">Восстановить из текста</button>' +
+        '<button class="btn-small" id="restore-cancel">Отмена</button>' +
+      '</div>' +
     '</div>' +
   '</div>';
 
