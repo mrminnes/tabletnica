@@ -141,6 +141,15 @@
     color:var(--mute); font-weight:700; font-size:14px; cursor:pointer;
   }
 
+  #sendbar{
+    position:fixed; left:12px; right:12px; z-index:16;
+    bottom:calc(80px + env(safe-area-inset-bottom));
+  }
+  #sendbar button{
+    width:100%; padding:15px 0; border-radius:18px; border:none; cursor:pointer;
+    background:var(--green); color:#fff; font-weight:900; font-size:15.5px;
+    box-shadow:0 8px 20px rgba(62,124,89,.42);
+  }
   #fab{
     position:fixed; right:16px; bottom:calc(86px + env(safe-area-inset-bottom)); z-index:15;
     width:58px; height:58px; border-radius:20px; border:none; background:var(--green); color:#fff;
@@ -162,6 +171,7 @@
 </head>
 <body>
   <div id="screen"></div>
+  <div id="sendbar" style="display:none"></div>
   <button id="fab" aria-label="Добавить лекарство">+</button>
   <div id="nav">
     <button data-nav="today"><div class="icon">🕘</div>Сегодня</button>
@@ -417,7 +427,9 @@ function renderToday() {
     }
 
     var status;
-    if (isTaken) status = '<div class="status taken-at">' + (rec.retro ? "отмечено позже" : "выпил в " + esc(rec.at)) + '</div>';
+    if (isTaken) status = '<div class="status taken-at">' +
+      (rec.via === "link" ? "отмечено по ссылке" : rec.retro ? "отмечено позже" : "выпил в " + esc(rec.at)) +
+      (rec.sent ? " · отправлено" : "") + '</div>';
     else if (isFuture) status = '<div class="status">запланировано</div>';
     else if (missed) status = '<div class="status miss">пропущено — нажми, если пил</div>';
     else status = '<div class="status">' + (soon ? "пора!" : "позже") + '</div>';
@@ -633,6 +645,29 @@ function render() {
 
   fab.style.display = screen === "add" ? "none" : "block";
   nav.style.display = screen === "add" ? "none" : "flex";
+
+  // Панель «отправить близкому» — только на своём профиле, где включён обмен
+  var bar = document.getElementById("sendbar");
+  var prof = curProfile();
+  var pend = (screen === "today" && prof.share) ? pendingShare(selectedKey) : [];
+  if (pend.length) {
+    bar.innerHTML = '<button id="send-now">📤 Отправить близкому · ' + pend.length +
+      (pend.length === 1 ? " приём" : pend.length < 5 ? " приёма" : " приёмов") + '</button>';
+    bar.style.display = "block";
+    fab.style.bottom = "calc(146px + env(safe-area-inset-bottom))";
+    document.getElementById("send-now").onclick = async function () {
+      var items = pendingShare(selectedKey);
+      if (!items.length) return;
+      await shareText(takenMessage(prof, items, selectedKey));
+      var taken = loadTakenFor(selectedKey);
+      items.forEach(function (x) { if (taken[x.key]) taken[x.key].sent = true; });
+      saveTakenFor(selectedKey, taken);
+      render();
+    };
+  } else {
+    bar.style.display = "none";
+    fab.style.bottom = "calc(86px + env(safe-area-inset-bottom))";
+  }
   nav.querySelectorAll("button").forEach(function (b) {
     b.classList.toggle("active", b.dataset.nav === screen);
   });
@@ -685,11 +720,6 @@ function bindEvents() {
         if (highlightKey === key) highlightKey = null;
         setTimeout(function () { justTaken = null; }, 700);
         if (navigator.vibrate) navigator.vibrate(30);
-        var prof = curProfile();
-        if (prof.share && med) {
-          var intake = { key: key, time: tm ? tm.t : "", n: n, med: med };
-          setTimeout(function () { shareText(takenMessage(prof, intake, atTime, selectedKey)); }, 250);
-        }
       }
       saveTakenFor(selectedKey, taken); saveMeds(meds); syncNotifications(); render();
     };
@@ -958,14 +988,28 @@ async function shareText(text) {
   catch (e) { alert(text); return true; }
 }
 
-// Сообщение об отметке приёма
-function takenMessage(prof, it, atTime, dateK) {
+// Сообщение об отметке приёмов — одно на любое их количество
+function takenMessage(prof, items, dateK) {
+  var payload = items.map(function (x) { return { k: x.key, t: x.time, at: x.at }; });
   var link = "medapp://taken?p=" + encodeURIComponent(prof.name) +
-             "&d=" + dateK + "&k=" + encodeURIComponent(it.key) +
-             "&t=" + it.time + "&at=" + atTime;
+             "&d=" + dateK + "&b=" + b64e(JSON.stringify(payload));
   var who = prof.self ? "Я" : prof.name;
-  return who + ": принято в " + atTime + " — " + it.med.name + ", " + fmtN(it.n) + " шт" +
-         " (по плану " + it.time + ")\n\nОтметить у себя: " + link;
+  var when = parseKey(dateK).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  var lines = items.map(function (x) {
+    return "✓ " + x.time + " — " + x.med.name + ", " + fmtN(x.n) + " шт (принято в " + x.at + ")";
+  });
+  return who + ", " + when + (items.length > 1 ? " — приняты:" : " — принято:") + "\n" +
+         lines.join("\n") + "\n\nОтметить у себя: " + link;
+}
+
+// Приёмы, отмеченные, но ещё не отправленные близкому
+function pendingShare(dateK) {
+  var taken = loadTakenFor(dateK), out = [];
+  intakesFor(parseKey(dateK)).forEach(function (it) {
+    var rec = taken[it.key];
+    if (rec && !rec.sent && !rec.via) out.push({ key: it.key, time: it.time, n: it.n, med: it.med, at: rec.at });
+  });
+  return out;
 }
 
 // Ссылка с расписанием — чтобы у близкого карточка совпала один в один
@@ -982,29 +1026,48 @@ function planLink(prof, medsList) {
 // ─── Приём входящих ссылок ───
 function applyTakenLink(params) {
   var pname = params.get("p") || "", dateK = params.get("d") || dateKey();
-  var key = params.get("k") || "", time = params.get("t") || "", at = params.get("at") || "";
   var prof = profiles.find(function (p) { return p.name.toLowerCase() === pname.toLowerCase(); });
   if (!prof) {
     alert("Нет карточки «" + pname + "». Создай её на вкладке «Люди» — и ссылки начнут отмечаться сами.");
     screen = "people"; render(); return;
   }
+
+  // Новый формат — пакет приёмов; старый — один приём в параметрах
+  var batch = [];
+  if (params.get("b")) {
+    try { batch = JSON.parse(b64d(params.get("b"))); } catch (e) { batch = []; }
+  }
+  if (!batch.length) batch = [{ k: params.get("k") || "", t: params.get("t") || "", at: params.get("at") || "" }];
+
   var taken = takenOf(prof.id, dateK);
   var list = medsOf(prof.id);
-  // точное совпадение по ключу приёма, иначе — по плановому времени
-  var hit = key;
-  if (!list.some(function (m) { return m.times.some(function (x) { return m.id + "@" + x.t === key; }); })) {
-    var byTime = null;
-    list.forEach(function (m) {
-      m.times.forEach(function (x) { if (x.t === time && !byTime) byTime = m.id + "@" + x.t; });
+  var applied = 0;
+
+  batch.forEach(function (b) {
+    var hit = b.k;
+    var exists = list.some(function (m) {
+      return m.times.some(function (x) { return m.id + "@" + x.t === b.k; });
     });
-    hit = byTime || key;
-  }
-  taken[hit] = { at: at || hhmm(new Date()), via: "link" };
+    if (!exists) {   // ключи не совпали — ищем по плановому времени
+      var byTime = null;
+      list.forEach(function (m) {
+        m.times.forEach(function (x) {
+          if (x.t === b.t && !byTime && !taken[m.id + "@" + x.t]) byTime = m.id + "@" + x.t;
+        });
+      });
+      hit = byTime || b.k;
+    }
+    if (!hit) return;
+    taken[hit] = { at: b.at || hhmm(new Date()), via: "link" };
+    applied++;
+  });
+
   localStorage.setItem("taken:" + prof.id + ":" + dateK, JSON.stringify(taken));
   curPid = prof.id; cfgSet("last_profile", curPid);
   meds = loadMeds(); screen = "today"; selectedKey = dateK;
   syncNotifications(); render();
   if (navigator.vibrate) navigator.vibrate(30);
+  if (applied > 1) setTimeout(function () { alert("Отмечено приёмов: " + applied); }, 100);
 }
 
 function applyPlanLink(params) {
