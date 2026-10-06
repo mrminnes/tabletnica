@@ -131,6 +131,20 @@
   .chip.on{ border-color:var(--green); background:var(--green); color:#fff; }
   .chips-wrap{ display:flex; flex-wrap:wrap; gap:6px; }
   .chips-wrap .chip{ flex:none; padding:10px 14px; font-size:13px; }
+  .cyc-row{ display:flex; gap:8px; margin-top:8px; }
+  .cyc-row > div{ flex:1; }
+  .cyc-row .cap{ font-size:12px; font-weight:800; color:var(--mute); margin-bottom:4px; }
+  .strip{ display:flex; gap:3px; margin-top:8px; }
+  .strip div{
+    flex:1; border-radius:8px; padding:5px 0; text-align:center; font-size:11px; font-weight:800;
+    background:var(--card); border:2px solid var(--line); color:var(--mute);
+  }
+  .strip div.on{ background:var(--green); border-color:var(--green); color:#fff; }
+  .section-title{ font-size:13.5px; font-weight:800; color:var(--mute); margin:18px 0 8px; }
+  .btn-extra{
+    width:100%; margin-top:6px; padding:13px 0; border-radius:16px; cursor:pointer;
+    border:2px dashed var(--green); background:none; color:var(--green); font-weight:800; font-size:14.5px;
+  }
   .btn-main{
     width:100%; margin-top:24px; padding:16px 0; border-radius:99px; border:none;
     background:var(--green); color:#fff; font-weight:900; font-size:17px; cursor:pointer;
@@ -306,7 +320,8 @@ function occursOn(m, date) {
   var diff = diffDays(parseKey(m.start), date);
   if (diff < 0) return false;
   if (m.courseDays && diff >= m.courseDays) return false;
-  if (m.mode === "interval") return diff % Math.max(1, m.every) === 0;
+  // Цикл: onDays дней приёма, затем перерыв, полная длина цикла — every
+  if (m.mode === "interval") return diff % Math.max(1, m.every) < Math.max(1, m.onDays || 1);
   return m.days.indexOf(dayIdx(date)) !== -1;
 }
 
@@ -339,7 +354,10 @@ function intakesFor(date) {
 
 function schedText(m) {
   if (m.mode === "interval") {
-    return m.every === 1 ? "каждый день" : m.every === 2 ? "через день" : "каждые " + m.every + " дн.";
+    var on = Math.max(1, m.onDays || 1), off = Math.max(0, m.every - on);
+    if (off === 0) return "каждый день";
+    if (on === 1) return off === 1 ? "через день" : "каждые " + m.every + " дн.";
+    return on + " через " + off + " (" + on + " дн. приём, " + off + " дн. перерыв)";
   }
   return m.days.length === 7 ? "каждый день" : m.days.map(function (d) { return DAY_NAMES[d]; }).join(" ");
 }
@@ -365,6 +383,7 @@ function renderToday() {
   var taken = loadTakenFor(selectedKey);
   var intakes = intakesFor(selDate);
   var done = intakes.filter(function (i) { return taken[i.key]; }).length;
+  var extras = extrasOf(taken);
 
   var dateStr = selDate.toLocaleDateString("ru-RU", isToday
     ? { day: "numeric", month: "long" }
@@ -376,7 +395,8 @@ function renderToday() {
     : (intakes.length === 0 ? "Приёмов не было" : done === intakes.length ? "Всё было принято ✅" : "Были пропуски");
 
   var sub = isFuture ? "Запланировано приёмов: " + intakes.length
-    : "Принято: " + done + " из " + intakes.length;
+    : "Принято: " + done + " из " + intakes.length +
+      (extras.length ? " · вне расписания: " + extras.length : "");
 
   // Недельная лента: ПН–ВС текущей недели, все дни кликабельны
   var monday = stripTime(new Date());
@@ -404,7 +424,7 @@ function renderToday() {
     (!isToday ? '<p style="margin:0 0 14px"><button class="link-btn" id="back-today">← вернуться к сегодня</button></p>' : '') +
     '<div class="week">' + week + '</div>';
 
-  if (intakes.length === 0) {
+  if (intakes.length === 0 && !extras.length) {
     html += '<div class="empty"><div class="emoji">💊</div><p>' + (isToday ? "На сегодня приёмов нет" : "В этот день приёмов нет") + '</p>' +
       (meds.length === 0 ? '<p class="hint">Добавь первое лекарство кнопкой «+»</p>' : '') + '</div>';
   }
@@ -447,7 +467,89 @@ function renderToday() {
         '<div class="right"><div class="time' + (soon ? " soon" : "") + '">' + esc(it.time) + '</div>' + status + '</div>' +
       '</div>';
   });
+
+  if (extras.length) {
+    html += '<div class="section-title">Вне расписания</div>';
+    extras.forEach(function (x) {
+      var r = x.rec;
+      html +=
+        '<div class="card taken" data-extra="' + esc(x.key) + '" role="button" aria-label="Приём вне расписания: ' + esc(r.name) + ', нажми чтобы удалить">' +
+          '<button class="pill-btn done" tabindex="-1" aria-hidden="true"><span class="check">✓</span></button>' +
+          '<div class="info">' +
+            '<div class="med-name" style="text-decoration:none">' + esc(r.name) + '</div>' +
+            '<div class="med-dose">' + fmtN(r.n) + ' шт' + (r.note ? ' · ' + esc(r.note) : '') + '</div>' +
+          '</div>' +
+          '<div class="right"><div class="time">' + esc(r.at) + '</div>' +
+            '<div class="status taken-at">' + (r.via === "link" ? "отмечено по ссылке" : "вне расписания") +
+            (r.sent ? " · отправлено" : "") + '</div></div>' +
+        '</div>';
+    });
+  }
+
+  if (!isFuture) {
+    html += '<button class="btn-extra" id="add-extra">＋ Выпил вне расписания</button>';
+  }
   return html;
+}
+
+// Приёмы вне расписания хранятся в той же записи дня под ключами «x:…»
+function extrasOf(taken) {
+  return Object.keys(taken)
+    .filter(function (k) { return k.indexOf("x:") === 0 && taken[k] && taken[k].extra; })
+    .map(function (k) { return { key: k, rec: taken[k] }; })
+    .sort(function (a, b) { return String(a.rec.at).localeCompare(String(b.rec.at)); });
+}
+
+// ─── Экран «Приём вне расписания» ───
+var extraForm = null;
+function blankExtra() {
+  return { lin: null, name: "", n: 1, at: hhmm(new Date()), note: "" };
+}
+function renderExtra() {
+  var f = extraForm;
+  var today = dateKey();
+  var lins = [];
+  meds.forEach(function (m) { if (lins.indexOf(linOf(m)) === -1) lins.push(linOf(m)); });
+  var chips = lins.map(function (lin) {
+    var fam = famOf(lin);
+    var act = activeVersions(lin);
+    var m = act[0] || fam[fam.length - 1];
+    return '<button class="chip' + (f.lin === lin ? " on" : "") + '" data-xmed="' + lin + '">' +
+      '<span class="pill-shape" style="width:16px; height:9px; margin-right:6px; vertical-align:middle; background:' + esc(m.color) + '"></span>' +
+      esc(m.name) + '</button>';
+  }).join("");
+  var dayStr = selectedKey === today ? "сегодня"
+    : parseKey(selectedKey).toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+
+  return '<h1 style="font-size:24px">Приём вне расписания</h1>' +
+    '<p class="sub" style="margin-bottom:0">Отметка на ' + esc(dayStr) + '. Подходит для «по необходимости» — обезболивающее, от давления и т.п.</p>' +
+
+    (chips ? '<label>Из моих лекарств</label><div class="chips-wrap">' + chips + '</div>' +
+      '<p class="hint-line">Выбранное лекарство спишется из запаса</p>' : '') +
+
+    '<label>' + (chips ? "Или впиши название" : "Название") + '</label>' +
+    '<input class="inp" id="x-name" value="' + esc(f.lin ? "" : f.name) + '" placeholder="Например, Нурофен">' +
+
+    '<div class="cyc-row">' +
+      '<div><div class="cap">Сколько, шт</div>' +
+        '<input type="text" inputmode="decimal" class="inp" id="x-n" value="' + fmtN(f.n) + '"></div>' +
+      '<div><div class="cap">Во сколько</div>' +
+        '<input type="time" class="inp" id="x-at" value="' + esc(f.at) + '"></div>' +
+    '</div>' +
+
+    '<label>Примечание (необязательно)</label>' +
+    '<input class="inp" id="x-note" value="' + esc(f.note) + '" placeholder="Например: болела голова">' +
+
+    '<button class="btn-main" id="x-save"' + (extraValid() ? '' : ' disabled') + '>Отметить приём</button>' +
+    '<button class="btn-ghost" id="x-cancel">Отмена</button>';
+}
+function extraValid() { return !!(extraForm.lin || extraForm.name.trim()); }
+function readExtra() {
+  var g = function (id) { return document.getElementById(id); };
+  if (g("x-name") && !extraForm.lin) extraForm.name = g("x-name").value;
+  if (g("x-n")) extraForm.n = num(g("x-n").value);
+  if (g("x-at")) extraForm.at = g("x-at").value || hhmm(new Date());
+  if (g("x-note")) extraForm.note = g("x-note").value;
 }
 
 // ─── Экран «Мои лекарства» ───
@@ -534,7 +636,7 @@ function renderMeds() {
 var form = null;
 function blankForm() {
   return { editId: null, name: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
-           days: [0,1,2,3,4,5,6], every: 2, start: dateKey(), remindOffsets: [0],
+           days: [0,1,2,3,4,5,6], every: 2, on: 1, off: 1, start: dateKey(), remindOffsets: [0],
            pack: 30, forever: true, courseN: 14, applyMode: "now", applyFrom: dateKey(new Date(Date.now() + 86400000)) };
 }
 function formFromMed(m) {
@@ -543,6 +645,7 @@ function formFromMed(m) {
     editId: m.id, name: m.name, doseNote: m.doseNote || "",
     times: m.times.map(function (x) { return { t: x.t, n: x.n }; }),
     mode: m.mode, days: m.days.slice(), every: m.every, start: m.start,
+    on: Math.max(1, m.onDays || 1), off: Math.max(0, (m.every || 1) - Math.max(1, m.onDays || 1)),
     remindOffsets: (m.remindOffsets || []).slice(), pack: h.pack,
     forever: !m.courseDays, courseN: m.courseDays || 14,
     applyMode: "now", applyFrom: dateKey(new Date(Date.now() + 86400000)),
@@ -580,15 +683,25 @@ function renderAdd() {
       return '<button class="day-chip' + (f.days.indexOf(i) !== -1 ? " on" : "") + '" data-day="' + i + '">' + d + '</button>';
     }).join("") + '</div>';
   } else {
-    html += '<input type="number" min="1" class="inp" id="f-every" value="' + f.every + '" style="margin-top:8px">' +
-      '<p class="hint-line">1 — каждый день, 2 — через день, 3 — каждые 3 дня… Отсчёт с сегодняшнего дня.</p>';
+    var presets = [[1, 1, "Через день"], [2, 2, "2 через 2"], [5, 2, "5 через 2"], [21, 7, "21 через 7"]];
+    html += '<div class="chips-wrap" style="margin-top:8px">' + presets.map(function (p) {
+        return '<button class="chip' + (f.on === p[0] && f.off === p[1] ? " on" : "") + '" data-cyc="' + p[0] + ',' + p[1] + '">' + p[2] + '</button>';
+      }).join("") + '</div>' +
+      '<div class="cyc-row">' +
+        '<div><div class="cap">Пьём, дней</div>' +
+          '<input type="number" min="1" class="inp" id="f-on" value="' + f.on + '"></div>' +
+        '<div><div class="cap">Перерыв, дней</div>' +
+          '<input type="number" min="0" class="inp" id="f-off" value="' + f.off + '"></div>' +
+      '</div>' +
+      '<p class="hint-line">Цикл повторяется с даты начала. 1 и 1 — через день, 1 и 2 — раз в 3 дня, 2 и 2 — два дня пьём, два отдыхаем.</p>' +
+      cycleStrip(f);
   }
 
   html += (!editing || editingFuture
     ? '<label>Дата начала</label>' +
       '<input type="date" class="inp" id="f-start" value="' + esc(f.start) + '">' +
       '<p class="hint-line">' + (f.mode === "interval"
-        ? "Для схемы «через день» задаёт точку отсчёта — поставь завтрашнюю дату, если начинаешь с завтра."
+        ? "Первый день цикла (день приёма). Если начинаешь с завтра — поставь завтрашнюю дату."
         : "До этой даты приёмов и напоминаний не будет.") + '</p>'
     : '') +
 
@@ -627,6 +740,20 @@ function renderAdd() {
     '<button class="btn-ghost" id="f-cancel">Отмена</button>';
   return html;
 }
+// Превью цикла на две недели вперёд от даты начала (или от сегодня, если старт уже был)
+function cycleStrip(f) {
+  var start = parseKey(f.start || dateKey());
+  var from = stripTime(new Date());
+  if (start > from) from = start;
+  var cells = "";
+  for (var i = 0; i < 14; i++) {
+    var d = new Date(from); d.setDate(from.getDate() + i);
+    var on = occursOn({ mode: "interval", start: f.start || dateKey(), every: f.on + f.off, onDays: f.on, until: null, courseDays: null }, d);
+    cells += '<div class="' + (on ? "on" : "") + '">' + d.getDate() + '</div>';
+  }
+  return '<div class="strip">' + cells + '</div>' +
+    '<p class="hint-line">Ближайшие 2 недели: зелёным — дни приёма</p>';
+}
 function formValid() {
   return form.name.trim() && (form.mode === "interval" || form.days.length > 0);
 }
@@ -642,9 +769,11 @@ function render() {
   else if (screen === "people") el.innerHTML = renderPeople();
   else if (screen === "person") el.innerHTML = renderPerson();
   else if (screen === "add") el.innerHTML = renderAdd();
+  else if (screen === "extra") el.innerHTML = renderExtra();
 
-  fab.style.display = screen === "add" ? "none" : "block";
-  nav.style.display = screen === "add" ? "none" : "flex";
+  var isForm = screen === "add" || screen === "extra";
+  fab.style.display = isForm ? "none" : "block";
+  nav.style.display = isForm ? "none" : "flex";
 
   // Панель «отправить близкому» — только на своём профиле, где включён обмен
   var bar = document.getElementById("sendbar");
@@ -680,7 +809,8 @@ function readForm() {
   if (g("f-note")) form.doseNote = g("f-note").value;
   document.querySelectorAll(".f-time").forEach(function (inp) { form.times[+inp.dataset.i].t = inp.value || "09:00"; });
   document.querySelectorAll(".f-n").forEach(function (inp) { form.times[+inp.dataset.i].n = num(inp.value); });
-  if (g("f-every")) form.every = Math.max(1, +g("f-every").value || 1);
+  if (g("f-on")) form.on = Math.max(1, Math.floor(+g("f-on").value) || 1);
+  if (g("f-off")) form.off = Math.max(0, Math.floor(+g("f-off").value) || 0);
   if (g("f-start")) form.start = g("f-start").value || dateKey();
   if (g("f-applyfrom")) form.applyFrom = g("f-applyfrom").value || form.applyFrom;
   if (g("f-pack")) form.pack = Math.max(1, +g("f-pack").value || 30);
@@ -724,6 +854,70 @@ function bindEvents() {
       saveTakenFor(selectedKey, taken); saveMeds(meds); syncNotifications(); render();
     };
   });
+
+  // Приём вне расписания: открыть форму / удалить отметку
+  var addExtra = document.getElementById("add-extra");
+  if (addExtra) addExtra.onclick = function () { extraForm = blankExtra(); screen = "extra"; render(); };
+  el.querySelectorAll("[data-extra]").forEach(function (card) {
+    card.onclick = function () {
+      var key = card.dataset.extra;
+      var taken = loadTakenFor(selectedKey);
+      var r = taken[key];
+      if (!r || !confirm("Удалить отметку «" + r.name + "»?")) return;
+      if (r.lin != null && !r.via) {
+        meds = meds.map(function (m) { return m.id === r.lin ? Object.assign({}, m, { stock: round2(m.stock + r.n) }) : m; });
+        saveMeds(meds);
+      }
+      delete taken[key];
+      saveTakenFor(selectedKey, taken); render();
+    };
+  });
+
+  if (screen === "extra") {
+    var gx = function (id) { return document.getElementById(id); };
+    gx("x-name").oninput = function () {
+      if (extraForm.lin && gx("x-name").value) {
+        // начали вписывать своё — снимаем выбор из списка
+        extraForm.lin = null; extraForm.name = gx("x-name").value;
+        el.querySelectorAll("[data-xmed]").forEach(function (b) { b.classList.remove("on"); });
+      }
+      readExtra(); gx("x-save").disabled = !extraValid();
+    };
+    el.querySelectorAll("[data-xmed]").forEach(function (btn) {
+      btn.onclick = function () {
+        readExtra();
+        var lin = +btn.dataset.xmed;
+        if (extraForm.lin === lin) { extraForm.lin = null; extraForm.name = ""; }
+        else {
+          var fam = famOf(lin), act = activeVersions(lin), m = act[0] || fam[fam.length - 1];
+          extraForm.lin = lin; extraForm.name = m.name;
+          extraForm.n = m.times.length ? m.times[0].n : 1;
+        }
+        render();
+      };
+    });
+    gx("x-save").onclick = function () {
+      readExtra();
+      if (!extraValid()) return;
+      var f = extraForm;
+      var taken = loadTakenFor(selectedKey);
+      var rec = { extra: true, name: f.name.trim().slice(0, 60), n: f.n, at: f.at, note: f.note.trim() };
+      if (selectedKey < dateKey()) rec.retro = true;
+      if (f.lin != null) {
+        var holder = meds.find(function (m) { return m.id === f.lin; });
+        if (holder) {
+          rec.lin = holder.id;
+          meds = meds.map(function (m) { return m.id === holder.id ? Object.assign({}, m, { stock: Math.max(0, round2(m.stock - f.n)) }) : m; });
+          saveMeds(meds);
+        }
+      }
+      taken["x:" + Date.now()] = rec;
+      saveTakenFor(selectedKey, taken);
+      if (navigator.vibrate) navigator.vibrate(30);
+      screen = "today"; render();
+    };
+    gx("x-cancel").onclick = function () { screen = "today"; render(); };
+  }
 
   // Изменить / пополнить / удалить / отменить запланированное изменение
   el.querySelectorAll("[data-edit]").forEach(function (btn) {
@@ -877,8 +1071,16 @@ function bindEvents() {
     });
     document.querySelectorAll(".f-time,.f-n").forEach(function (inp) { inp.onchange = readForm; });
     g("f-pack").onchange = readForm;
-    if (g("f-every")) g("f-every").onchange = readForm;
-    if (g("f-start")) g("f-start").onchange = readForm;
+    if (g("f-on")) g("f-on").onchange = function () { readForm(); render(); };
+    if (g("f-off")) g("f-off").onchange = function () { readForm(); render(); };
+    if (g("f-start")) g("f-start").onchange = function () { readForm(); if (form.mode === "interval") render(); };
+    document.querySelectorAll("[data-cyc]").forEach(function (btn) {
+      btn.onclick = function () {
+        readForm();
+        var p = btn.dataset.cyc.split(",");
+        form.on = +p[0]; form.off = +p[1]; render();
+      };
+    });
     if (g("f-applyfrom")) g("f-applyfrom").onchange = readForm;
     if (g("f-now")) g("f-now").onclick = function () { readForm(); form.applyMode = "now"; render(); };
     if (g("f-from")) g("f-from").onclick = function () { readForm(); form.applyMode = "from"; render(); };
@@ -915,7 +1117,9 @@ function bindEvents() {
       var fields = {
         name: form.name.trim(), doseNote: form.doseNote.trim(),
         times: form.times.map(function (x) { return { t: x.t, n: x.n }; }),
-        mode: form.mode, days: form.days.slice(), every: form.every,
+        mode: form.mode, days: form.days.slice(),
+        every: form.mode === "interval" ? form.on + form.off : form.every,
+        onDays: form.mode === "interval" ? form.on : 1,
         remindOffsets: form.remindOffsets.slice(),
         courseDays: form.forever ? null : form.courseN,
       };
@@ -1001,12 +1205,17 @@ async function shareText(text) {
 
 // Сообщение об отметке приёмов — одно на любое их количество
 function takenMessage(prof, items, dateK) {
-  var payload = items.map(function (x) { return { k: x.key, t: x.time, at: x.at }; });
+  var payload = items.map(function (x) {
+    // t пустой у внеплановых — старые версии не спутают их с плановым приёмом
+    return x.extra ? { k: x.key, t: "", at: x.at, x: 1, nm: x.med.name, n: x.n }
+                   : { k: x.key, t: x.time, at: x.at };
+  });
   var link = "medapp://taken?p=" + encodeURIComponent(prof.name) +
              "&d=" + dateK + "&b=" + b64e(JSON.stringify(payload));
   var who = prof.self ? "Я" : prof.name;
   var when = parseKey(dateK).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
   var lines = items.map(function (x) {
+    if (x.extra) return "✓ вне расписания — " + x.med.name + ", " + fmtN(x.n) + " шт (принято в " + x.at + ")";
     return "✓ " + x.time + " — " + x.med.name + ", " + fmtN(x.n) + " шт (принято в " + x.at + ")";
   });
   return who + ", " + when + (items.length > 1 ? " — приняты:" : " — принято:") + "\n" +
@@ -1020,6 +1229,10 @@ function pendingShare(dateK) {
     var rec = taken[it.key];
     if (rec && !rec.sent && !rec.via) out.push({ key: it.key, time: it.time, n: it.n, med: it.med, at: rec.at });
   });
+  extrasOf(taken).forEach(function (x) {
+    var r = x.rec;
+    if (!r.sent && !r.via) out.push({ key: x.key, time: r.at, n: r.n, med: { name: r.name }, at: r.at, extra: true });
+  });
   return out;
 }
 
@@ -1027,7 +1240,7 @@ function pendingShare(dateK) {
 function planLink(prof, medsList) {
   var payload = { n: prof.name, m: medsList.map(function (m) {
     return { id: m.id, lineage: m.lineage, name: m.name, doseNote: m.doseNote,
-             times: m.times, mode: m.mode, days: m.days, every: m.every,
+             times: m.times, mode: m.mode, days: m.days, every: m.every, onDays: m.onDays,
              start: m.start, until: m.until, courseDays: m.courseDays,
              remindOffsets: m.remindOffsets, pack: m.pack, stock: m.stock, color: m.color };
   }) };
@@ -1055,6 +1268,12 @@ function applyTakenLink(params) {
   var applied = 0;
 
   batch.forEach(function (b) {
+    if (b.x) {
+      if (!b.k || b.k.indexOf("x:") !== 0) return;
+      taken[b.k] = { extra: true, name: String(b.nm || "Лекарство").slice(0, 60), n: num(b.n), at: b.at || hhmm(new Date()), via: "link" };
+      applied++;
+      return;
+    }
     var hit = b.k;
     var exists = list.some(function (m) {
       return m.times.some(function (x) { return m.id + "@" + x.t === b.k; });
