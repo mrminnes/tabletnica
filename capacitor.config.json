@@ -1,6 +1,6 @@
 {
-  "appId": "ru.mytabs.app",
-  "appName": "Мои таблетки",
+  "appId": "ru.prinyato.app",
+  "appName": "Принято",
   "webDir": "www",
   "server": {
     "androidScheme": "https",
@@ -9,7 +9,7 @@
   "plugins": {
     "LocalNotifications": {
       "smallIcon": "ic_stat_icon",
-      "iconColor": "#3E7C59"
+      "iconColor": "#1F6B4E"
     }
   }
 }

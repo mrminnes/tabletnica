@@ -2,18 +2,19 @@
   "name": "med-tracker",
   "version": "1.0.0",
   "private": true,
-  "description": "Мои таблетки — напоминания о приёме лекарств",
+  "description": "Принято — карманная таблетница: напоминания о приёме лекарств",
   "scripts": {
     "android": "npx cap sync android && npx cap open android"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
     "@capacitor/core": "^7.0.0",
     "@capacitor/local-notifications": "^7.0.0",
-    "@capacitor/app": "^7.0.0",
     "@capacitor/share": "^7.0.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^7.0.0"
   }
 }

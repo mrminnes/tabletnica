@@ -29,6 +29,13 @@ jobs:
       - name: Generate Android project
         run: npx cap add android
 
+      - name: App icon, splash and notification icon
+        run: |
+          npx capacitor-assets generate --android \
+            --iconBackgroundColor '#1F6B4E' --iconBackgroundColorDark '#1F6B4E' \
+            --splashBackgroundColor '#EDF2EE' --splashBackgroundColorDark '#0E1714'
+          cp -r android-res/* android/app/src/main/res/
+
       - name: Sync web assets
         run: npx cap sync android
 
@@ -69,5 +76,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: med-tracker-apk
+          name: prinyato-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk

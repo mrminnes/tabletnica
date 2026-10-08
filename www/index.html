@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#F2F8F4">
-<title>Мои таблетки</title>
+<title>Принято</title>
 <style>
   @font-face{ font-family:'Manrope'; font-style:normal; font-weight:400 800; font-display:swap;
     src:url(fonts/manrope-cyrillic.woff2) format('woff2');
@@ -1076,7 +1076,7 @@ function bindEvents() {
 
   var bSave = document.getElementById("backup-save");
   if (bSave) bSave.onclick = async function () {
-    await shareText("Резервная копия «Мои таблетки» от " +
+    await shareText("Резервная копия «Принято» от " +
       new Date().toLocaleDateString("ru-RU") +
       ". Сохрани это сообщение — по нему данные восстанавливаются.\n\n" + backupMake());
     cfgSet("backup_at", new Date().toLocaleDateString("ru-RU"));
