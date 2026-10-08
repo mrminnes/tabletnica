@@ -196,6 +196,40 @@
   }
   .panel-title{ font-weight:700; font-size:15.5px; margin-bottom:4px; }
 
+  /* Дневник */
+  .stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .stats div{ background:var(--card); border-radius:16px; padding:12px 10px; box-shadow:var(--shadow); }
+  .stats b{ display:block; font-size:24px; font-weight:800; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+  .stats span{ display:block; font-size:12px; color:var(--mute); font-weight:600; line-height:1.3; margin-top:2px; }
+  .cal-head{ display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:16px; margin-bottom:8px; }
+  .cal-nav{ width:40px; height:40px; border-radius:12px; border:1.5px solid var(--line); background:none;
+    color:var(--ink); font-size:20px; font-weight:700; cursor:pointer; }
+  .cal-nav:disabled{ opacity:.3; cursor:default; }
+  .cal{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal-dow span{ text-align:center; font-size:11px; font-weight:700; color:var(--mute); padding-bottom:4px; }
+  .cal button{ aspect-ratio:1; border:none; border-radius:10px; background:transparent; cursor:pointer;
+    font-weight:700; font-size:14px; color:var(--ink); font-variant-numeric:tabular-nums; padding:0; }
+  .cal button.full{ background:var(--green); color:var(--on-accent); }
+  .cal button.part{ background:var(--amber-soft); color:var(--amber); }
+  .cal button.miss{ background:var(--coral-soft); color:var(--coral); }
+  .cal button.none{ color:var(--mute); }
+  .cal button.future{ color:var(--mute); opacity:.45; }
+  .cal button.today{ box-shadow:inset 0 0 0 2px var(--ink); }
+  .cal-legend{ display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:var(--mute); font-weight:600; }
+  .cal-legend span{ display:flex; align-items:center; gap:5px; }
+  .cal-legend i{ width:12px; height:12px; border-radius:4px; display:inline-block; }
+  .cal-legend i.full{ background:var(--green); } .cal-legend i.part{ background:var(--amber-soft); box-shadow:inset 0 0 0 1.5px var(--amber); }
+  .cal-legend i.miss{ background:var(--coral-soft); box-shadow:inset 0 0 0 1.5px var(--coral); }
+  .vitals{ padding:6px 14px; }
+  .v-day{ font-size:12.5px; font-weight:700; color:var(--mute); padding:10px 0 4px; }
+  .v-row{ display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); }
+  .v-day + .v-row{ border-top:none; }
+  .v-time{ font-size:13px; color:var(--mute); font-weight:600; font-variant-numeric:tabular-nums; width:42px; }
+  .v-name{ flex:1; font-weight:600; font-size:14.5px; min-width:0; }
+  .v-name small{ display:block; color:var(--mute); font-size:12.5px; font-weight:500; }
+  .v-row b{ font-size:15px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .v-del{ width:32px; height:32px; border:none; background:none; color:var(--mute); font-size:20px; cursor:pointer; border-radius:8px; }
+
   /* Нижняя зона: кнопка «Отправить» слева, «+» справа — не перекрывают друг друга */
   #sendbar{
     position:fixed; left:14px; right:86px; z-index:16;
@@ -237,6 +271,7 @@
   <div id="nav">
     <button data-nav="today"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>Сегодня</button>
     <button data-nav="meds"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8.5" width="18" height="7" rx="3.5" transform="rotate(-45 12 12)"/><path d="M9.5 9.5l5 5"/></svg></div>Лекарства</button>
+    <button data-nav="diary"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M9 15l2 2 4-4"/></svg></div>Дневник</button>
     <button data-nav="people"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.6 2.6 3 5.2"/></svg></div>Люди</button>
   </div>
 
@@ -329,9 +364,9 @@ function saveTakenFor(key, t) { localStorage.setItem("taken:" + curPid + ":" + k
   if (localStorage.getItem("profiles") === null) saveProfiles(profiles);
 })();
 
-// Чистим отметки старше 90 дней
+// Чистим отметки старше 400 дней — год истории для дневника и врача
 (function cleanup() {
-  var limit = new Date(); limit.setDate(limit.getDate() - 90);
+  var limit = new Date(); limit.setDate(limit.getDate() - 400);
   for (var i = localStorage.length - 1; i >= 0; i--) {
     var k = localStorage.key(i);
     var parts = k ? k.split(":") : [];
@@ -437,6 +472,16 @@ function remindText(m) {
 }
 
 // ─── Экран «Сегодня» (с просмотром любого дня недели) ───
+// Переключатель людей — на экранах «Сегодня» и «Дневник»
+function profileSwitcher() {
+  return profiles.length > 1
+    ? '<div class="chips-wrap" style="margin-bottom:12px">' + profiles.map(function (p) {
+        return '<button class="chip' + (p.id === curPid ? " on" : "") + '" data-pid="' + esc(p.id) + '">' +
+          esc(p.name) + '</button>';
+      }).join("") + '</div>'
+    : '';
+}
+
 function renderToday() {
   var todayK = dateKey();
   var selDate = parseKey(selectedKey);
@@ -475,12 +520,7 @@ function renderToday() {
       '<div class="lbl">' + DAY_NAMES[i] + '</div><div class="num">' + d.getDate() + '</div><div class="dots">' + dots + '</div></div>';
   }
 
-  var switcher = profiles.length > 1
-    ? '<div class="chips-wrap" style="margin-bottom:12px">' + profiles.map(function (p) {
-        return '<button class="chip' + (p.id === curPid ? " on" : "") + '" data-pid="' + esc(p.id) + '">' +
-          esc(p.name) + '</button>';
-      }).join("") + '</div>'
-    : '';
+  var switcher = profileSwitcher();
 
   var html = switcher + '<p class="date">' + esc(dateStr) + '</p>' +
     '<h1>' + title + '</h1>' +
@@ -831,6 +871,229 @@ var el = document.getElementById("screen");
 var fab = document.getElementById("fab");
 var nav = document.getElementById("nav");
 
+// ─── Дневник: календарь приёма, соблюдение, показатели здоровья ───
+var diaryMonth = null;   // первый день показываемого месяца
+var vitalForm = null;    // открытая форма показателя { type }
+var VITALS = {
+  bp:     { name: "Давление",    unit: "мм рт. ст.", two: true, ph: ["120", "80"] },
+  pulse:  { name: "Пульс",       unit: "уд/мин",     ph: ["70"] },
+  sugar:  { name: "Сахар",       unit: "ммоль/л",    ph: ["5,5"] },
+  weight: { name: "Вес",         unit: "кг",         ph: ["70"] },
+  temp:   { name: "Температура", unit: "°C",         ph: ["36,6"] },
+};
+var MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
+              "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+
+function vitalsOf(pid) { try { return JSON.parse(localStorage.getItem("vitals:" + pid)) || []; } catch (e) { return []; } }
+function saveVitals(v) { localStorage.setItem("vitals:" + curPid, JSON.stringify(v)); }
+function vitalVal(s) { var x = parseFloat(String(s).replace(",", ".")); return isFinite(x) && x > 0 ? round2(x) : null; }
+function fmtVital(x) {
+  var t = VITALS[x.type];
+  return (t.two ? fmtN(x.v1) + "/" + fmtN(x.v2) : fmtN(x.v1)) + " " + t.unit;
+}
+
+// Сколько приёмов было запланировано в день и сколько отмечено
+function dayStat(d) {
+  var list = intakesFor(d), t = loadTakenFor(dateKey(d));
+  return { plan: list.length, done: list.filter(function (i) { return t[i.key]; }).length };
+}
+
+// Соблюдение за N прошедших дней (сегодня не считаем — день ещё идёт)
+function adherence(days) {
+  var plan = 0, done = 0, missed = 0;
+  for (var i = 1; i <= days; i++) {
+    var d = stripTime(new Date()); d.setDate(d.getDate() - i);
+    var s = dayStat(d);
+    plan += s.plan; done += s.done;
+    if (s.done < s.plan) missed++;
+  }
+  return { plan: plan, done: done, missedDays: missed, pct: plan ? Math.round(done / plan * 100) : null };
+}
+
+// Серия: дни подряд без пропусков. Дни без приёмов серию не прерывают
+function streak() {
+  var n = 0, today = stripTime(new Date());
+  var t = dayStat(today);
+  if (t.plan && t.done === t.plan) n++;
+  for (var i = 1; i <= 365; i++) {
+    var d = new Date(today); d.setDate(d.getDate() - i);
+    var s = dayStat(d);
+    if (!s.plan) continue;
+    if (s.done < s.plan) break;
+    n++;
+  }
+  return n;
+}
+
+function daysWord(n) {
+  var a = n % 10, b = n % 100;
+  return a === 1 && b !== 11 ? "день" : a >= 2 && a <= 4 && (b < 10 || b >= 20) ? "дня" : "дней";
+}
+
+function renderDiary() {
+  if (!diaryMonth) { diaryMonth = stripTime(new Date()); diaryMonth.setDate(1); }
+  var todayK = dateKey();
+  var a30 = adherence(30), st = streak();
+
+  var html = profileSwitcher() + '<h1>Дневник</h1>' +
+    '<p class="sub">' + esc(curProfile().name) + ' · история приёма и показатели</p>';
+
+  html += '<div class="stats">' +
+    '<div><b>' + (a30.pct === null ? "—" : a30.pct + "%") + '</b><span>принято за 30 дней</span></div>' +
+    '<div><b>' + st + '</b><span>' + daysWord(st) + ' без пропусков</span></div>' +
+    '<div><b>' + a30.missedDays + '</b><span>' + daysWord(a30.missedDays) + ' с пропусками</span></div>' +
+  '</div>';
+
+  // Календарь месяца
+  var y = diaryMonth.getFullYear(), mo = diaryMonth.getMonth();
+  var first = new Date(y, mo, 1), daysIn = new Date(y, mo + 1, 0).getDate();
+  var cells = "";
+  for (var i = 0; i < dayIdx(first); i++) cells += '<span></span>';
+  for (var dnum = 1; dnum <= daysIn; dnum++) {
+    var d = new Date(y, mo, dnum), k = dateKey(d), cls = "";
+    if (k > todayK) cls = "future";
+    else {
+      var s = dayStat(d);
+      if (!s.plan) cls = "none";
+      else if (s.done === s.plan) cls = "full";
+      else if (k === todayK) cls = "part";
+      else cls = s.done ? "part" : "miss";
+    }
+    cells += '<button class="' + cls + (k === todayK ? " today" : "") + '" data-cal-day="' + k + '">' + dnum + '</button>';
+  }
+  var isCurMonth = y === new Date().getFullYear() && mo === new Date().getMonth();
+  html += '<div class="card" style="display:block">' +
+    '<div class="cal-head">' +
+      '<button class="cal-nav" id="cal-prev" aria-label="Предыдущий месяц">‹</button>' +
+      '<div>' + MONTHS[mo] + ' ' + y + '</div>' +
+      '<button class="cal-nav" id="cal-next" aria-label="Следующий месяц"' + (isCurMonth ? ' disabled' : '') + '>›</button>' +
+    '</div>' +
+    '<div class="cal cal-dow">' + DAY_NAMES.map(function (n) { return '<span>' + n + '</span>'; }).join("") + '</div>' +
+    '<div class="cal">' + cells + '</div>' +
+    '<div class="cal-legend"><span><i class="full"></i>всё принято</span><span><i class="part"></i>частично</span><span><i class="miss"></i>пропущено</span></div>' +
+  '</div>';
+
+  // Показатели
+  var vit = vitalsOf(curPid);
+  html += '<div class="section-title">Показатели</div>' +
+    '<div class="chips-wrap">' + Object.keys(VITALS).map(function (t) {
+      return '<button class="chip' + (vitalForm && vitalForm.type === t ? " on" : "") + '" data-vital-add="' + t + '">+ ' + VITALS[t].name + '</button>';
+    }).join("") + '</div>';
+
+  if (vitalForm) {
+    var vt = VITALS[vitalForm.type];
+    html += '<div class="card" style="display:block; margin-top:10px">' +
+      '<div class="panel-title">' + vt.name + ', ' + vt.unit + '</div>' +
+      '<div class="time-row" style="margin-top:10px">' +
+        '<input class="inp" id="v-1" inputmode="decimal" placeholder="' + vt.ph[0] + '"' + (vt.two ? ' aria-label="Верхнее"' : '') + '>' +
+        (vt.two ? '<input class="inp" id="v-2" inputmode="decimal" placeholder="' + vt.ph[1] + '" aria-label="Нижнее">' : '') +
+      '</div>' +
+      '<input class="inp" id="v-note" placeholder="Комментарий, необязательно" style="margin-top:2px">' +
+      '<div class="med-actions">' +
+        '<button class="btn-small primary" id="v-save">Сохранить</button>' +
+        '<button class="btn-small" id="v-cancel">Отмена</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  if (vit.length) {
+    var shown = vit.slice().sort(function (a, b) { return b.at.localeCompare(a.at); }).slice(0, 30);
+    var lastDay = "";
+    html += '<div class="card vitals" style="display:block; margin-top:10px">';
+    shown.forEach(function (x) {
+      var day = x.at.slice(0, 10);
+      if (day !== lastDay) {
+        html += '<div class="v-day">' + esc(parseKey(day).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })) + '</div>';
+        lastDay = day;
+      }
+      html += '<div class="v-row"><span class="v-time">' + esc(x.at.slice(11, 16)) + '</span>' +
+        '<span class="v-name">' + VITALS[x.type].name + (x.note ? '<small>' + esc(x.note) + '</small>' : '') + '</span>' +
+        '<b>' + esc(fmtVital(x)) + '</b>' +
+        '<button class="v-del" data-vital-del="' + esc(x.id) + '" aria-label="Удалить запись">×</button></div>';
+    });
+    html += '</div>';
+  } else if (!vitalForm) {
+    html += '<p class="hint-line" style="margin-top:10px">Записывай давление, сахар и другие показатели — они попадут в отчёт для врача.</p>';
+  }
+
+  html += '<button class="btn-main" id="doctor-report">Отправить отчёт врачу</button>' +
+    '<p class="hint-line" style="text-align:center">Лекарства, соблюдение и показатели за 30 дней — одним сообщением</p>';
+  return html;
+}
+
+function doctorReport() {
+  var prof = curProfile(), today = new Date();
+  var lines = ["Отчёт о приёме лекарств — " + prof.name, "Дата: " + today.toLocaleDateString("ru-RU"), "", "Лекарства:"];
+  var lins = [];
+  meds.forEach(function (m) { if (lins.indexOf(linOf(m)) === -1) lins.push(linOf(m)); });
+  var any = false;
+  lins.forEach(function (lin) {
+    var act = activeVersions(lin);
+    if (!act.length) return;
+    var m = act[0]; any = true;
+    lines.push("• " + m.name + (m.doseNote ? " (" + m.doseNote + ")" : "") + ": " +
+      m.times.map(function (x) { return x.t + " — " + fmtN(x.n) + " шт"; }).join(", ") + "; " + schedText(m) +
+      (m.courseDays ? "; курс " + m.courseDays + " дн." : ""));
+  });
+  if (!any) lines.push("нет активных");
+
+  var a = adherence(30);
+  lines.push("", "Соблюдение за 30 дней: " + (a.pct === null ? "нет запланированных приёмов"
+    : a.pct + "% (принято " + a.done + " из " + a.plan + ", дней с пропусками: " + a.missedDays + ")"));
+
+  var from = new Date(); from.setDate(from.getDate() - 30);
+  var vit = vitalsOf(curPid).filter(function (x) { return x.at.slice(0, 10) >= dateKey(from); })
+    .sort(function (a, b) { return a.at.localeCompare(b.at); });
+  if (vit.length) {
+    lines.push("", "Показатели за 30 дней:");
+    Object.keys(VITALS).forEach(function (t) {
+      var rows = vit.filter(function (x) { return x.type === t; });
+      if (!rows.length) return;
+      lines.push(VITALS[t].name + ", " + VITALS[t].unit + ":");
+      rows.forEach(function (x) {
+        var d = parseKey(x.at.slice(0, 10));
+        lines.push("  " + pad(d.getDate()) + "." + pad(d.getMonth() + 1) + " " + x.at.slice(11, 16) + " — " +
+          (VITALS[t].two ? fmtN(x.v1) + "/" + fmtN(x.v2) : fmtN(x.v1)) + (x.note ? " (" + x.note + ")" : ""));
+      });
+    });
+  }
+  return lines.join("\n");
+}
+
+function bindDiary() {
+  var g = function (id) { return document.getElementById(id); };
+  el.querySelectorAll("[data-cal-day]").forEach(function (b) {
+    b.onclick = function () { selectedKey = b.dataset.calDay; screen = "today"; render(); };
+  });
+  g("cal-prev").onclick = function () { diaryMonth = new Date(diaryMonth.getFullYear(), diaryMonth.getMonth() - 1, 1); render(); };
+  g("cal-next").onclick = function () { diaryMonth = new Date(diaryMonth.getFullYear(), diaryMonth.getMonth() + 1, 1); render(); };
+  el.querySelectorAll("[data-vital-add]").forEach(function (b) {
+    b.onclick = function () {
+      vitalForm = vitalForm && vitalForm.type === b.dataset.vitalAdd ? null : { type: b.dataset.vitalAdd };
+      render();
+      if (g("v-1")) g("v-1").focus();
+    };
+  });
+  if (g("v-cancel")) g("v-cancel").onclick = function () { vitalForm = null; render(); };
+  if (g("v-save")) g("v-save").onclick = function () {
+    var t = VITALS[vitalForm.type];
+    var v1 = vitalVal(g("v-1").value), v2 = t.two ? vitalVal(g("v-2").value) : null;
+    if (v1 === null || (t.two && v2 === null)) { alert("Введи значение" + (t.two ? ": верхнее и нижнее" : "")); return; }
+    var v = vitalsOf(curPid);
+    v.push({ id: String(Date.now()), type: vitalForm.type, at: dateKey() + " " + hhmm(new Date()),
+             v1: v1, v2: v2, note: g("v-note").value.trim() });
+    saveVitals(v); vitalForm = null; render();
+  };
+  el.querySelectorAll("[data-vital-del]").forEach(function (b) {
+    b.onclick = function () {
+      if (!confirm("Удалить запись?")) return;
+      saveVitals(vitalsOf(curPid).filter(function (x) { return x.id !== b.dataset.vitalDel; }));
+      render();
+    };
+  });
+  g("doctor-report").onclick = function () { shareText(doctorReport()); };
+}
+
 function render() {
   if (screen === "today") el.innerHTML = renderToday();
   else if (screen === "meds") el.innerHTML = renderMeds();
@@ -838,6 +1101,7 @@ function render() {
   else if (screen === "person") el.innerHTML = renderPerson();
   else if (screen === "add") el.innerHTML = renderAdd();
   else if (screen === "extra") el.innerHTML = renderExtra();
+  else if (screen === "diary") el.innerHTML = renderDiary();
 
   var isForm = screen === "add" || screen === "extra";
   fab.style.display = isForm ? "none" : "block";
@@ -867,6 +1131,7 @@ function render() {
     b.classList.toggle("active", b.dataset.nav === screen);
   });
   bindEvents();
+  if (screen === "diary") bindDiary();
 }
 
 function readForm() {
@@ -1052,6 +1317,7 @@ function bindEvents() {
       var p = profiles.find(function (x) { return x.id === btn.dataset.delp; });
       if (!p || !confirm("Удалить карточку «" + p.name + "» со всеми лекарствами и историей?")) return;
       localStorage.removeItem("meds:" + p.id);
+      localStorage.removeItem("vitals:" + p.id);
       for (var i = localStorage.length - 1; i >= 0; i--) {
         var k = localStorage.key(i);
         if (k && k.indexOf("taken:" + p.id + ":") === 0) localStorage.removeItem(k);
@@ -1517,7 +1783,7 @@ function backupMake() {
   var dump = { v: 2, at: new Date().toISOString(), profiles: profiles, data: {} };
   for (var i = 0; i < localStorage.length; i++) {
     var k = localStorage.key(i);
-    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0)) dump.data[k] = localStorage.getItem(k);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0)) dump.data[k] = localStorage.getItem(k);
   }
   return "МОИ-ТАБЛЕТКИ-КОПИЯ:" + b64e(JSON.stringify(dump));
 }
@@ -1534,7 +1800,7 @@ function backupRestore(text) {
 
   for (var i = localStorage.length - 1; i >= 0; i--) {
     var k = localStorage.key(i);
-    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0)) localStorage.removeItem(k);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0)) localStorage.removeItem(k);
   }
   Object.keys(dump.data).forEach(function (k) { localStorage.setItem(k, dump.data[k]); });
   profiles = dump.profiles; saveProfiles(profiles);
