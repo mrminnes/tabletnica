@@ -36,6 +36,25 @@ jobs:
             --splashBackgroundColor '#EDF2EE' --splashBackgroundColorDark '#0E1714'
           cp -r android-res/* android/app/src/main/res/
 
+      - name: Home screen widget (native code + manifest)
+        run: |
+          cp -r android-src/* android/app/src/main/java/
+          python3 - << 'EOF'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          receiver = (
+              '        <receiver android:name=".TodayWidget" android:exported="false" android:label="@string/widget_name">\n'
+              '            <intent-filter>\n'
+              '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+              '            </intent-filter>\n'
+              '            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_info" />\n'
+              '        </receiver>\n'
+          )
+          s = s.replace('</application>', receiver + '    </application>', 1)
+          open(p, 'w', encoding='utf-8').write(s)
+          EOF
+          grep -c "TodayWidget" android/app/src/main/AndroidManifest.xml
+
       - name: Sync web assets
         run: npx cap sync android
 

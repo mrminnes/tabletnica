@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_name">Принято: сегодня</string>
+    <string name="widget_desc">Сколько приёмов отмечено и какой следующий</string>
+    <string name="widget_title">Принято</string>
+    <string name="widget_open_app">открой приложение</string>
+</resources>

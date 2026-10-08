@@ -1182,6 +1182,31 @@ function renderHelp() {
   return html;
 }
 
+// ─── Виджет на рабочем столе ───
+// Отдаём нативному виджету приёмы своей карточки на сегодня и завтра.
+// Следующий приём и смену дня виджет считает сам по текущему времени.
+var widgetTimer = null;
+function widgetSync() {
+  var W = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TodayWidget;
+  if (!W) return;
+  clearTimeout(widgetTimer);
+  widgetTimer = setTimeout(function () {
+    var saved = meds;
+    try {
+      var prof = profiles.find(function (p) { return p.self; }) || profiles[0];
+      meds = medsOf(prof.id);   // intakesFor считает по текущему списку лекарств
+      var now = new Date(), tom = new Date(now.getTime() + 86400000);
+      var taken = takenOf(prof.id, dateKey(now));
+      var row = function (it, ok) { return { t: it.time, nm: it.med.name, ok: ok ? 1 : 0 }; };
+      var data = { v: 1, date: dateKey(now),
+        today: intakesFor(now).map(function (it) { return row(it, taken[it.key]); }),
+        tomorrow: intakesFor(tom).map(function (it) { return row(it, false); }) };
+      W.update({ data: JSON.stringify(data) }).catch(function () {});
+    } catch (e) {}
+    meds = saved;
+  }, 300);
+}
+
 function render() {
   if (screen === "today") el.innerHTML = renderToday();
   else if (screen === "meds") el.innerHTML = renderMeds();
@@ -1222,6 +1247,7 @@ function render() {
   });
   bindEvents();
   if (screen === "diary") bindDiary();
+  widgetSync();
 }
 
 function readForm() {
