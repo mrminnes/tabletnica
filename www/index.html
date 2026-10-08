@@ -121,6 +121,19 @@
   .faq summary::after{ content:"+"; color:var(--mute); font-weight:600; font-size:20px; line-height:1; }
   .faq details[open] summary::after{ content:"−"; }
   .faq p{ margin:0 0 14px; color:var(--mute); font-size:14.5px; line-height:1.5; font-weight:500; }
+  .group-title{ margin-top:18px; }
+  .group-title .link-btn{ font-size:14px; color:var(--ink); }
+  .photos{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .ph{ aspect-ratio:1; border-radius:14px; overflow:hidden; border:1.5px solid var(--line); background:var(--sunk);
+    padding:0; cursor:pointer; display:grid; place-items:center; }
+  .ph img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .ph-add{ border-style:dashed; color:var(--green); font-size:26px; font-weight:600; margin:0; align-content:center; gap:0; }
+  .ph-add span{ font-size:12.5px; font-weight:700; }
+  .doc-med{ display:flex; align-items:center; gap:10px; padding:6px 0; font-weight:600; }
+  .viewer{ position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.92); display:flex; flex-direction:column; }
+  .viewer img{ flex:1; min-height:0; width:100%; object-fit:contain; }
+  .viewer-bar{ display:flex; gap:8px; padding:12px 14px calc(14px + env(safe-area-inset-bottom)); }
+  .viewer-bar .btn-small{ background:var(--card); }
   .as-link{ display:block; text-align:center; text-decoration:none; box-sizing:border-box; }
   .strength{ font-weight:600; color:var(--mute); font-size:15px; }
   .form-chips .chip{ display:inline-flex; align-items:center; gap:6px; }
@@ -729,9 +742,9 @@ function renderMeds() {
   meds.forEach(function (m) { if (lins.indexOf(linOf(m)) === -1) lins.push(linOf(m)); });
   var shown = 0;
 
-  lins.forEach(function (lin) {
+  var medCard = function (lin) {
     var act = activeVersions(lin);
-    if (!act.length) return;           // лекарство закончилось — остаётся только в истории
+    if (!act.length) return "";        // лекарство закончилось — остаётся только в истории
     shown++;
     var m = act[0];                    // действующая версия
     var next = act[1];                 // запланированная замена, если есть
@@ -739,7 +752,7 @@ function renderMeds() {
     var timesTxt = m.times.map(function (x) { return x.t + " (" + fmtN(x.n) + " " + unitOf(m) + ")"; }).join(", ");
     var shortDate = function (k) { return parseKey(k).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }); };
 
-    html +=
+    return (
       '<div class="card" style="display:block">' +
         '<div style="display:flex; align-items:center; gap:10px">' +
           pillIcon(m, 32) +
@@ -773,7 +786,30 @@ function renderMeds() {
           '<button class="btn-small primary" data-refill="' + h.id + '">Купил +' + h.pack + '</button>' +
           '<button class="btn-small danger" data-del="' + lin + '">Удалить</button>' +
         '</div>' +
-      '</div>';
+      '</div>');
+  };
+
+  // Группы по врачам; без врачей — общий список как раньше
+  var docs = doctorsOf(curPid);
+  var docIds = docs.map(function (d) { return d.id; });
+  var groups = docs.map(function (d) { return { doc: d, lins: [] }; });
+  var noDoc = { doc: null, lins: [] };
+  lins.forEach(function (lin) {
+    var act = activeVersions(lin);
+    var di = act.length ? docIds.indexOf(act[0].doc) : -1;
+    (di === -1 ? noDoc : groups[di]).lins.push(lin);
+  });
+  html += '<button class="card help-link" id="open-doctors" style="margin:0 0 14px">' +
+    '<div class="info"><div class="panel-title">Врачи и назначения</div>' +
+    '<div class="meta">' + (docs.length ? docs.map(function (d) { return esc(d.name); }).join(", ")
+      : "Сгруппируй лекарства по врачам, храни фото назначений") + '</div></div>' +
+    '<span class="chev" aria-hidden="true">›</span></button>';
+  groups.concat([noDoc]).forEach(function (g) {
+    var cards = g.lins.map(medCard).join("");
+    if (!cards) return;
+    if (docs.length) html += '<div class="section-title group-title">' +
+      (g.doc ? '<button class="link-btn" data-opendoc="' + esc(g.doc.id) + '">' + esc(g.doc.name) + ' ›</button>' : 'Без врача') + '</div>';
+    html += cards;
   });
 
   if (shown === 0) {
@@ -785,14 +821,14 @@ function renderMeds() {
 // ─── Экран «Добавить» ───
 var form = null;
 function blankForm() {
-  return { editId: null, name: "", form: "tablet", strength: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
+  return { editId: null, name: "", doc: null, form: "tablet", strength: "", doseNote: "", times: [{ t: "09:00", n: 1 }], mode: "weekly",
            days: [0,1,2,3,4,5,6], every: 2, on: 1, off: 1, start: dateKey(), remindOffsets: [0],
            pack: 30, forever: true, courseN: 14, applyMode: "now", applyFrom: dateKey(new Date(Date.now() + 86400000)) };
 }
 function formFromMed(m) {
   var h = holderOf(m);
   return {
-    editId: m.id, name: m.name, form: formOf(m), strength: m.strength || "", doseNote: m.doseNote || "",
+    editId: m.id, name: m.name, doc: m.doc || null, form: formOf(m), strength: m.strength || "", doseNote: m.doseNote || "",
     times: m.times.map(function (x) { return { t: x.t, n: x.n }; }),
     mode: m.mode, days: m.days.slice(), every: m.every, start: m.start,
     on: Math.max(1, m.onDays || 1), off: Math.max(0, (m.every || 1) - Math.max(1, m.onDays || 1)),
@@ -816,6 +852,15 @@ function renderAdd() {
       return '<button class="chip' + (f.form === k ? " on" : "") + '" data-form="' + k + '">' +
         pillIcon({ form: k, color: "currentColor" }, 18) + FORMS[k].name + '</button>';
     }).join("") + '</div>' +
+
+    '<label>Кто назначил</label>' +
+    '<div class="chips-wrap">' +
+      '<button class="chip' + (!f.doc ? " on" : "") + '" data-fdoc="">Не указан</button>' +
+      doctorsOf(curPid).map(function (d) {
+        return '<button class="chip' + (f.doc === d.id ? " on" : "") + '" data-fdoc="' + esc(d.id) + '">' + esc(d.name) + '</button>';
+      }).join("") +
+      '<button class="chip" id="f-newdoc">+ Врач</button>' +
+    '</div>' +
 
     '<label>Дозировка (необязательно)</label>' +
     '<input class="inp" id="f-strength" value="' + esc(f.strength) + '" placeholder="Например, 10 мг или 2000 МЕ">' +
@@ -921,6 +966,186 @@ function formValid() {
 var el = document.getElementById("screen");
 var fab = document.getElementById("fab");
 var nav = document.getElementById("nav");
+
+// ─── Врачи и назначения ───
+// doctors:<pid> = [{ id, name, note, visit, photos: [photoId] }]; у лекарства поле doc = id врача
+function doctorsOf(pid) { try { return JSON.parse(localStorage.getItem("doctors:" + pid)) || []; } catch (e) { return []; } }
+function saveDoctors(d) { localStorage.setItem("doctors:" + curPid, JSON.stringify(d)); }
+function doctorById(id) { return doctorsOf(curPid).find(function (d) { return d.id === id; }) || null; }
+var doctorId = null;     // открытая карточка врача
+var photoCache = {};     // id → data:URL, чтобы не читать файл при каждой перерисовке
+
+// Фото храним файлами в папке приложения (в localStorage они бы не поместились).
+// В браузере, где нет Filesystem, — в localStorage, только для проверки.
+function fsApi() { var P = window.Capacitor && window.Capacitor.Plugins; return P && P.Filesystem; }
+async function photoSave(dataUrl) {
+  var id = "ph" + Date.now() + Math.floor(Math.random() * 1000);
+  var FS = fsApi();
+  if (FS) await FS.writeFile({ path: "photos/" + id + ".jpg", data: dataUrl.split(",")[1], directory: "DATA", recursive: true });
+  else localStorage.setItem("photo:" + id, dataUrl);
+  photoCache[id] = dataUrl;
+  return id;
+}
+async function photoLoad(id) {
+  if (photoCache[id]) return photoCache[id];
+  var FS = fsApi(), url = null;
+  try {
+    if (FS) url = "data:image/jpeg;base64," + (await FS.readFile({ path: "photos/" + id + ".jpg", directory: "DATA" })).data;
+    else url = localStorage.getItem("photo:" + id);
+  } catch (e) {}
+  if (url) photoCache[id] = url;
+  return url;
+}
+async function photoDelete(id) {
+  delete photoCache[id];
+  var FS = fsApi();
+  try {
+    if (FS) await FS.deleteFile({ path: "photos/" + id + ".jpg", directory: "DATA" });
+    else localStorage.removeItem("photo:" + id);
+  } catch (e) {}
+}
+// Сжимаем снимок до 1600 px по длинной стороне — фото рецепта читается, а весит ~200 КБ
+function shrinkImage(file) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = function () {
+      var img = new Image();
+      img.onerror = reject;
+      img.onload = function () {
+        var k = Math.min(1, 1600 / Math.max(img.width, img.height));
+        var c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function fillPhotos() {
+  el.querySelectorAll("img[data-photo]").forEach(function (img) {
+    photoLoad(img.dataset.photo).then(function (url) { if (url) img.src = url; else img.alt = "Фото не найдено"; });
+  });
+}
+function openPhoto(id) {
+  var box = document.createElement("div");
+  box.className = "viewer";
+  box.innerHTML = '<img alt="Фото назначения"><div class="viewer-bar">' +
+    '<button class="btn-small" id="pv-del">Удалить фото</button><button class="btn-small primary" id="pv-close">Закрыть</button></div>';
+  document.body.appendChild(box);
+  photoLoad(id).then(function (url) { if (url) box.querySelector("img").src = url; });
+  box.querySelector("#pv-close").onclick = function () { box.remove(); };
+  box.querySelector("#pv-del").onclick = function () {
+    if (!confirm("Удалить это фото?")) return;
+    var docs = doctorsOf(curPid);
+    docs.forEach(function (d) { d.photos = (d.photos || []).filter(function (x) { return x !== id; }); });
+    saveDoctors(docs); photoDelete(id); box.remove(); render();
+  };
+}
+
+function renderDoctors() {
+  var docs = doctorsOf(curPid);
+  var html = '<button class="link-btn" id="docs-back">← Лекарства</button>' +
+    '<h1 style="margin-top:10px">Врачи и назначения</h1>' +
+    '<p class="sub">Лекарства по врачам, заметки с приёма и фото назначений</p>';
+  docs.forEach(function (d) {
+    var cnt = meds.filter(function (m) { return m.doc === d.id && activeVersions(linOf(m)).indexOf(m) === 0; }).length;
+    html += '<button class="card help-link" data-opendoc="' + esc(d.id) + '" style="margin:0 0 10px">' +
+      '<div class="avatar">' + esc(d.name.trim().charAt(0).toUpperCase()) + '</div>' +
+      '<div class="info"><div class="med-name">' + esc(d.name) + '</div>' +
+      '<div class="meta">' + cnt + ' лек. · фото: ' + (d.photos || []).length +
+        (d.visit ? ' · приём ' + esc(parseKey(d.visit).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })) : '') + '</div></div>' +
+      '<span class="chev" aria-hidden="true">›</span></button>';
+  });
+  if (!docs.length) html += '<div class="empty"><span class="pill-shape"></span><p>Пока ни одного врача</p>' +
+    '<p class="hint">Например: «Кардиолог», «Терапевт Иванова»</p></div>';
+  html += '<button class="btn-main" id="add-doctor">+ Добавить врача</button>';
+  return html;
+}
+
+function renderDoctor() {
+  var d = doctorById(doctorId);
+  if (!d) { screen = "doctors"; return renderDoctors(); }
+  var list = [];
+  meds.forEach(function (m) {
+    var act = activeVersions(linOf(m));
+    if (act[0] === m && m.doc === d.id) list.push(m);
+  });
+  var html = '<button class="link-btn" id="doc-back">← Врачи</button>' +
+    '<label>Врач</label>' +
+    '<input class="inp" id="doc-name" value="' + esc(d.name) + '" placeholder="Например, Кардиолог Иванова">' +
+    '<label>Дата приёма</label>' +
+    '<input type="date" class="inp" id="doc-visit" value="' + esc(d.visit || "") + '">' +
+    '<label>Назначения и рекомендации</label>' +
+    '<textarea class="inp" id="doc-note" rows="4" placeholder="Что сказал врач, когда прийти снова, какие анализы сдать" style="resize:vertical">' + esc(d.note || "") + '</textarea>' +
+    '<label>Фото назначений</label>' +
+    '<div class="photos">' + (d.photos || []).map(function (id) {
+      return '<button class="ph" data-photo-open="' + esc(id) + '"><img data-photo="' + esc(id) + '" alt="Фото назначения"></button>';
+    }).join("") +
+      '<label class="ph ph-add">+<span>Снять</span><input type="file" accept="image/*" capture="environment" class="doc-photo" hidden></label>' +
+      '<label class="ph ph-add">+<span>Из галереи</span><input type="file" accept="image/*" class="doc-photo" hidden></label>' +
+    '</div>' +
+    '<p class="hint-line">Фото рецептов и выписок хранятся только на телефоне и не входят в резервную копию.</p>' +
+    '<label>Лекарства от этого врача</label>' +
+    (list.length ? '<div class="card" style="display:block">' + list.map(function (m) {
+      return '<div class="doc-med">' + pillIcon(m, 22) + '<span>' + esc(m.name) + (m.strength ? ' ' + esc(m.strength) : '') + '</span></div>';
+    }).join("") + '</div>'
+      : '<p class="hint-line" style="margin-top:0">Выбери врача в карточке лекарства: «Изменить» → «Кто назначил».</p>') +
+    '<button class="btn-ghost" id="doc-del" style="color:var(--coral); margin-top:18px">Удалить врача</button>';
+  return html;
+}
+
+function bindDoctors() {
+  var g = function (id) { return document.getElementById(id); };
+  el.querySelectorAll("[data-opendoc]").forEach(function (b) {
+    b.onclick = function () { doctorId = b.dataset.opendoc; screen = "doctor"; render(); window.scrollTo(0, 0); };
+  });
+  if (g("open-doctors")) g("open-doctors").onclick = function () { screen = "doctors"; render(); window.scrollTo(0, 0); };
+  if (g("docs-back")) g("docs-back").onclick = function () { screen = "meds"; render(); };
+  if (g("add-doctor")) g("add-doctor").onclick = function () {
+    var name = (prompt("Врач или специальность", "") || "").trim();
+    if (!name) return;
+    var docs = doctorsOf(curPid);
+    var d = { id: "d" + Date.now(), name: name, note: "", visit: dateKey(), photos: [] };
+    docs.push(d); saveDoctors(docs);
+    doctorId = d.id; screen = "doctor"; render();
+  };
+  if (screen !== "doctor") return;
+  var save = function (patch) {
+    var docs = doctorsOf(curPid);
+    docs.forEach(function (d) { if (d.id === doctorId) Object.assign(d, patch); });
+    saveDoctors(docs);
+  };
+  g("doc-back").onclick = function () { screen = "doctors"; render(); };
+  g("doc-name").onchange = function () { var v = g("doc-name").value.trim(); if (v) save({ name: v }); };
+  g("doc-visit").onchange = function () { save({ visit: g("doc-visit").value }); };
+  g("doc-note").onchange = function () { save({ note: g("doc-note").value }); };
+  el.querySelectorAll(".doc-photo").forEach(function (inp) { inp.onchange = async function () {
+    var file = inp.files && inp.files[0];
+    if (!file) return;
+    try {
+      var id = await photoSave(await shrinkImage(file));
+      var d = doctorById(doctorId);
+      save({ photos: (d.photos || []).concat([id]) });
+      render();
+    } catch (e) { alert("Не получилось сохранить фото"); }
+  }; });
+  el.querySelectorAll("[data-photo-open]").forEach(function (b) {
+    b.onclick = function () { openPhoto(b.dataset.photoOpen); };
+  });
+  g("doc-del").onclick = function () {
+    var d = doctorById(doctorId);
+    if (!d || !confirm("Удалить «" + d.name + "» вместе с фото? Лекарства останутся, просто без врача.")) return;
+    (d.photos || []).forEach(photoDelete);
+    saveDoctors(doctorsOf(curPid).filter(function (x) { return x.id !== d.id; }));
+    meds = meds.map(function (m) { return m.doc === d.id ? Object.assign({}, m, { doc: null }) : m; });
+    saveMeds(meds);
+    screen = "doctors"; render();
+  };
+  fillPhotos();
+}
 
 // ─── Дневник: календарь приёма, соблюдение, показатели здоровья ───
 var diaryMonth = null;   // первый день показываемого месяца
@@ -1067,8 +1292,9 @@ function renderDiary() {
     html += '<p class="hint-line" style="margin-top:10px">Записывай давление, сахар и другие показатели — они попадут в отчёт для врача.</p>';
   }
 
-  html += '<button class="btn-main" id="doctor-report">Отправить отчёт врачу</button>' +
-    '<p class="hint-line" style="text-align:center">Лекарства, соблюдение и показатели за 30 дней — одним сообщением</p>';
+  html += '<button class="btn-main" id="doctor-report">Отчёт врачу в PDF</button>' +
+    '<p class="hint-line" style="text-align:center">Лекарства, соблюдение и показатели за 30 дней. ' +
+    '<button class="link-btn" id="doctor-text" style="font-size:12.5px">Отправить текстом</button></p>';
   return html;
 }
 
@@ -1085,6 +1311,7 @@ function doctorReport() {
     lines.push("• " + m.name + (m.strength ? " " + m.strength : "") + ", " + FORMS[formOf(m)].name.toLowerCase() +
       (m.doseNote ? " (" + m.doseNote + ")" : "") + ": " +
       m.times.map(function (x) { return x.t + " — " + fmtN(x.n) + " " + unitOf(m); }).join(", ") + "; " + schedText(m) +
+      (doctorById(m.doc) ? "; назначил: " + doctorById(m.doc).name : "") +
       (m.courseDays ? "; курс " + m.courseDays + " дн." : ""));
   });
   if (!any) lines.push("нет активных");
@@ -1110,6 +1337,165 @@ function doctorReport() {
     });
   }
   return lines.join("\n");
+}
+
+// ─── Отчёт врачу в PDF ───
+// jsPDF и шрифт лежат в приложении и подгружаются только при первом отчёте
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
+    if (document.querySelector('script[src="' + src + '"]')) return resolve();
+    var sc = document.createElement("script");
+    sc.src = src; sc.onload = resolve; sc.onerror = reject;
+    document.head.appendChild(sc);
+  });
+}
+
+async function doctorPdf() {
+  await loadScript("vendor/jspdf.umd.min.js");
+  await loadScript("vendor/pdf-fonts.js");
+  var doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+  doc.addFileToVFS("Manrope-Regular.ttf", window.PDF_FONTS.regular);
+  doc.addFont("Manrope-Regular.ttf", "Manrope", "normal");
+  doc.addFileToVFS("Manrope-Bold.ttf", window.PDF_FONTS.bold);
+  doc.addFont("Manrope-Bold.ttf", "Manrope", "bold");
+
+  var INK = [20, 35, 28], MUTE = [90, 108, 99], GREEN = [31, 107, 78], LINE = [217, 227, 220];
+  var L = 18, W = 174, BOTTOM = 280, y = 20;
+  var prof = curProfile(), today = new Date();
+  var font = function (style, size, color) { doc.setFont("Manrope", style); doc.setFontSize(size); doc.setTextColor.apply(doc, color || INK); };
+  var need = function (h) { if (y + h > BOTTOM) { doc.addPage(); y = 20; } };
+  var section = function (title) {
+    need(16); y += 4;
+    font("bold", 13); doc.text(title, L, y); y += 3;
+    doc.setDrawColor.apply(doc, GREEN); doc.setLineWidth(0.6); doc.line(L, y, L + W, y); y += 6;
+  };
+  // Таблица: колонки с долями ширины, перенос строк в ячейках
+  var table = function (cols, rows) {
+    var widths = cols.map(function (c) { return c[1] * W; });
+    var drawRow = function (cells, head) {
+      font(head ? "bold" : "normal", 9.5, head ? MUTE : INK);
+      var lines = cells.map(function (c, i) { return doc.splitTextToSize(String(c), widths[i] - 3); });
+      var h = Math.max.apply(null, lines.map(function (l) { return l.length; })) * 4.4 + 3;
+      need(h);
+      var x = L;
+      lines.forEach(function (l, i) { doc.text(l, x, y + 4); x += widths[i]; });
+      y += h;
+      doc.setDrawColor.apply(doc, LINE); doc.setLineWidth(0.25); doc.line(L, y - 1, L + W, y - 1);
+    };
+    drawRow(cols.map(function (c) { return c[0]; }), true);
+    rows.forEach(function (r) { drawRow(r, false); });
+  };
+
+  // Шапка
+  font("bold", 10, GREEN); doc.text("Принято — карманная таблетница", L, y); y += 9;
+  font("bold", 20); doc.text("Отчёт о приёме лекарств", L, y); y += 8;
+  font("normal", 11, MUTE);
+  var who = prof.self && prof.name === "Я" ? "" : "Пациент: " + prof.name + "     ";
+  doc.text(who + "Сформирован: " + today.toLocaleDateString("ru-RU"), L, y); y += 6;
+
+  // Лекарства
+  section("Лекарства");
+  var rows = [], lins = [];
+  meds.forEach(function (m) { if (lins.indexOf(linOf(m)) === -1) lins.push(linOf(m)); });
+  lins.forEach(function (lin) {
+    var act = activeVersions(lin);
+    if (!act.length) return;
+    var m = act[0], dr = doctorById(m.doc);
+    rows.push([
+      m.name + (m.strength ? " " + m.strength : "") + "\n" + FORMS[formOf(m)].name.toLowerCase() + (m.doseNote ? ", " + m.doseNote : ""),
+      m.times.map(function (x) { return x.t + " — " + fmtN(x.n) + " " + unitOf(m); }).join("\n"),
+      schedText(m) + (m.courseDays ? ", курс " + m.courseDays + " дн." : ""),
+      dr ? dr.name : "—",
+    ]);
+  });
+  if (rows.length) table([["Препарат", 0.34], ["Приём", 0.22], ["Схема", 0.22], ["Назначил", 0.22]], rows);
+  else { font("normal", 10.5, MUTE); doc.text("Нет активных лекарств", L, y); y += 6; }
+
+  // Заметки врачей
+  var notes = doctorsOf(curPid).filter(function (dr) { return (dr.note || "").trim(); });
+  if (notes.length) {
+    section("Назначения и рекомендации врачей");
+    notes.forEach(function (dr) {
+      font("bold", 10.5); need(10);
+      doc.text(dr.name + (dr.visit ? ", приём " + parseKey(dr.visit).toLocaleDateString("ru-RU") : ""), L, y); y += 5;
+      font("normal", 10);
+      doc.splitTextToSize(dr.note.trim(), W).forEach(function (ln) { need(5); doc.text(ln, L, y); y += 4.6; });
+      y += 2;
+    });
+  }
+
+  // Соблюдение: процент и полоска по дням
+  section("Соблюдение за 30 дней");
+  var a = adherence(30);
+  need(26);
+  font("bold", 24, GREEN); doc.text(a.pct === null ? "—" : a.pct + "%", L, y + 7);
+  font("normal", 10.5, MUTE);
+  doc.text(a.pct === null ? "Запланированных приёмов не было"
+    : "принято " + a.done + " из " + a.plan + " приёмов, дней с пропусками: " + a.missedDays, L + 32, y + 6);
+  y += 13;
+  var cell = W / 30;
+  for (var i = 30; i >= 1; i--) {
+    var d = stripTime(today); d.setDate(d.getDate() - i);
+    var st = dayStat(d), col = [237, 242, 238];
+    if (st.plan) col = st.done === st.plan ? [31, 107, 78] : st.done ? [232, 176, 76] : [214, 92, 70];
+    doc.setFillColor.apply(doc, col);
+    doc.roundedRect(L + (30 - i) * cell, y, cell - 0.8, 6, 1, 1, "F");
+  }
+  y += 10;
+  font("normal", 8.5, MUTE);
+  var from = stripTime(today); from.setDate(from.getDate() - 30);
+  var yest = stripTime(today); yest.setDate(yest.getDate() - 1);
+  doc.text(from.toLocaleDateString("ru-RU"), L, y);
+  doc.text(yest.toLocaleDateString("ru-RU"), L + W, y, { align: "right" });
+  doc.text("зелёный — всё принято, жёлтый — частично, красный — пропуск", L + W / 2, y, { align: "center" });
+  y += 4;
+
+  // Показатели
+  var vit = vitalsOf(curPid).filter(function (x) { return x.at.slice(0, 10) >= dateKey(from); })
+    .sort(function (p, q) { return p.at.localeCompare(q.at); });
+  if (vit.length) {
+    section("Показатели за 30 дней");
+    Object.keys(VITALS).forEach(function (t) {
+      var r = vit.filter(function (x) { return x.type === t; });
+      if (!r.length) return;
+      need(14);
+      font("bold", 10.5); doc.text(VITALS[t].name + ", " + VITALS[t].unit, L, y); y += 2;
+      table([["Дата", 0.18], ["Время", 0.12], ["Значение", 0.2], ["Комментарий", 0.5]], r.map(function (x) {
+        return [parseKey(x.at.slice(0, 10)).toLocaleDateString("ru-RU"), x.at.slice(11, 16),
+          VITALS[t].two ? fmtN(x.v1) + "/" + fmtN(x.v2) : fmtN(x.v1), x.note || ""];
+      }));
+      y += 3;
+    });
+  }
+
+  // Подвал на каждой странице
+  var pages = doc.getNumberOfPages();
+  for (var pg = 1; pg <= pages; pg++) {
+    doc.setPage(pg);
+    font("normal", 8, MUTE);
+    doc.text("Данные внесены пациентом в приложении «Принято». Не заменяет медицинскую документацию.", L, 290);
+    doc.text(pg + " / " + pages, L + W, 290, { align: "right" });
+  }
+  return doc;
+}
+
+async function sharePdf() {
+  var btn = document.getElementById("doctor-report");
+  if (btn) { btn.disabled = true; btn.textContent = "Готовлю PDF…"; }
+  try {
+    var doc = await doctorPdf();
+    var name = "otchet-" + dateKey() + ".pdf";
+    var P = window.Capacitor && window.Capacitor.Plugins;
+    if (P && P.Filesystem && P.Share) {
+      var r = await P.Filesystem.writeFile({ path: name, data: doc.output("datauristring").split(",")[1], directory: "CACHE" });
+      await P.Share.share({ title: "Отчёт о приёме лекарств", files: [r.uri], dialogTitle: "Отправить отчёт" });
+    } else {
+      doc.save(name);
+    }
+  } catch (e) {
+    if (String(e && e.message || e).indexOf("cancel") === -1) alert("Не получилось сделать PDF. Отправь отчёт текстом");
+  }
+  if (btn) { btn.disabled = false; btn.textContent = "Отчёт врачу в PDF"; }
 }
 
 function bindDiary() {
@@ -1143,7 +1529,8 @@ function bindDiary() {
       render();
     };
   });
-  g("doctor-report").onclick = function () { shareText(doctorReport()); };
+  g("doctor-report").onclick = sharePdf;
+  g("doctor-text").onclick = function () { shareText(doctorReport()); };
 }
 
 // ─── Справка ───
@@ -1216,9 +1603,11 @@ function render() {
   else if (screen === "extra") el.innerHTML = renderExtra();
   else if (screen === "diary") el.innerHTML = renderDiary();
   else if (screen === "help") el.innerHTML = renderHelp();
+  else if (screen === "doctors") el.innerHTML = renderDoctors();
+  else if (screen === "doctor") el.innerHTML = renderDoctor();
 
   var isForm = screen === "add" || screen === "extra";
-  fab.style.display = isForm || screen === "help" ? "none" : "grid";
+  fab.style.display = isForm || screen === "help" || screen === "doctor" ? "none" : "grid";
   nav.style.display = isForm ? "none" : "flex";
 
   // Панель «отправить близкому» — только на своём профиле, где включён обмен
@@ -1243,10 +1632,12 @@ function render() {
   }
   nav.querySelectorAll("button").forEach(function (b) {
     b.classList.toggle("active", b.dataset.nav === screen ||
-      (b.dataset.nav === "people" && (screen === "help" || screen === "person")));
+      (b.dataset.nav === "people" && (screen === "help" || screen === "person")) ||
+      (b.dataset.nav === "meds" && (screen === "doctors" || screen === "doctor")));
   });
   bindEvents();
   if (screen === "diary") bindDiary();
+  if (screen === "meds" || screen === "doctors" || screen === "doctor") bindDoctors();
   widgetSync();
 }
 
@@ -1435,6 +1826,8 @@ function bindEvents() {
       if (!p || !confirm("Удалить карточку «" + p.name + "» со всеми лекарствами и историей?")) return;
       localStorage.removeItem("meds:" + p.id);
       localStorage.removeItem("vitals:" + p.id);
+      doctorsOf(p.id).forEach(function (d) { (d.photos || []).forEach(photoDelete); });
+      localStorage.removeItem("doctors:" + p.id);
       for (var i = localStorage.length - 1; i >= 0; i--) {
         var k = localStorage.key(i);
         if (k && k.indexOf("taken:" + p.id + ":") === 0) localStorage.removeItem(k);
@@ -1541,6 +1934,18 @@ function bindEvents() {
     document.querySelectorAll(".f-time,.f-n").forEach(function (inp) { inp.onchange = readForm; });
     g("f-pack").onchange = readForm;
     g("f-strength").onchange = readForm;
+    document.querySelectorAll("[data-fdoc]").forEach(function (btn) {
+      btn.onclick = function () { readForm(); form.doc = btn.dataset.fdoc || null; render(); };
+    });
+    g("f-newdoc").onclick = function () {
+      readForm();
+      var name = (prompt("Врач или специальность", "") || "").trim();
+      if (!name) return;
+      var docs = doctorsOf(curPid);
+      var d = { id: "d" + Date.now(), name: name, note: "", visit: dateKey(), photos: [] };
+      docs.push(d); saveDoctors(docs);
+      form.doc = d.id; render();
+    };
     document.querySelectorAll("[data-form]").forEach(function (btn) {
       btn.onclick = function () { readForm(); form.form = btn.dataset.form; render(); };
     });
@@ -1588,7 +1993,7 @@ function bindEvents() {
       readForm();
       if (!formValid()) return;
       var fields = {
-        name: form.name.trim(), form: form.form, strength: form.strength.trim(), doseNote: form.doseNote.trim(),
+        name: form.name.trim(), doc: form.doc || null, form: form.form, strength: form.strength.trim(), doseNote: form.doseNote.trim(),
         times: form.times.map(function (x) { return { t: x.t, n: x.n }; }),
         mode: form.mode, days: form.days.slice(),
         every: form.mode === "interval" ? form.on + form.off : form.every,
@@ -1929,7 +2334,7 @@ function backupMake() {
   var dump = { v: 2, at: new Date().toISOString(), profiles: profiles, data: {} };
   for (var i = 0; i < localStorage.length; i++) {
     var k = localStorage.key(i);
-    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0)) dump.data[k] = localStorage.getItem(k);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0 || k.indexOf("doctors:") === 0)) dump.data[k] = localStorage.getItem(k);
   }
   return "МОИ-ТАБЛЕТКИ-КОПИЯ:" + b64e(JSON.stringify(dump));
 }
@@ -1969,7 +2374,7 @@ function backupRestore(text) {
 
   for (var i = localStorage.length - 1; i >= 0; i--) {
     var k = localStorage.key(i);
-    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0)) localStorage.removeItem(k);
+    if (k && (k.indexOf("meds:") === 0 || k.indexOf("taken:") === 0 || k.indexOf("vitals:") === 0 || k.indexOf("doctors:") === 0)) localStorage.removeItem(k);
   }
   Object.keys(dump.data).forEach(function (k) { localStorage.setItem(k, dump.data[k]); });
   profiles = dump.profiles; saveProfiles(profiles);
